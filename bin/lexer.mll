@@ -4,16 +4,25 @@ open Core
 let symbol_table =
   Hashtbl.of_alist_exn
     (module String)
-    [ ":", Parser.COLON
+    [ "|", Parser.BAR
+    ; "case", Parser.CASE
+    ; ":", Parser.COLON
     ; ",", Parser.COMMA
     ; "decl", Parser.DECL
+    ; ".", Parser.DOT
+    ; "...", Parser.DOTDOTDOT
     ; "=", Parser.EQUAL
     ; "fun", Parser.FUN
     ; "in", Parser.IN
+    ; "{", Parser.LCURLY
     ; "let", Parser.LET
     ; "(", Parser.LPAREN
+    ; "[", Parser.LSQUARE
+    ; "-", Parser.MINUS
     ; "->", Parser.MINUSGREATER
+    ; "}", Parser.RCURLY
     ; ")", Parser.RPAREN
+    ; "]", Parser.RSQUARE
     ; ";", Parser.SEMICOLON
     ; "type", Parser.TYPE
     ]
@@ -62,11 +71,13 @@ rule token_exn = parse
           kwd
       | None ->
           Parser.IDENT name }
+  | '`' ((lower | upper) (lower | upper | digit | '_' | '\'')* as name)
+    { Parser.LABEL name }
   | '\'' ((lower | upper) (lower | upper | digit | '_' | '\'')* as name)
     { Parser.TYVAR name }
-  | "->"
+  | "..." | "->"
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
-  | [':' ',' '=' '(' ')' ';']
+  | ['|' ':' ',' '.' '=' '{' '(' '[' '-' '}' ')' ']' ';']
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
   | eof
     { Parser.EOF }

@@ -1,7 +1,7 @@
 open Core
 
 module Lang = struct
-  let name = "hindley-milner"
+  let name = "extensible-row"
 
   type command = Ast.untyped_dec
   type environment = Infer.Env.t

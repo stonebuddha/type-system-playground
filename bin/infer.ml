@@ -22,6 +22,10 @@ type tyexp =
   | Tye_const of string
   | Tye_app of tyexp * tyexp list
   | Tye_arrow of tyexp * tyexp
+  | Tye_record of tyexp
+  | Tye_variant of tyexp
+  | Tye_row_empty
+  | Tye_row_extend of string * tyexp * tyexp
   | Tye_quan_var of Ast.ty_id
   | Tye_var of tyvar ref
 
@@ -50,6 +54,11 @@ let rec embed_ty_exn env ty =
   | Ty_app (ty1, ty2s) ->
     Tye_app (embed_ty_exn env ty1, List.map ty2s ~f:(embed_ty_exn env))
   | Ty_arrow (ty1, ty2) -> Tye_arrow (embed_ty_exn env ty1, embed_ty_exn env ty2)
+  | Ty_record row -> Tye_record (embed_ty_exn env row)
+  | Ty_variant row -> Tye_variant (embed_ty_exn env row)
+  | Ty_row_empty -> Tye_row_empty
+  | Ty_row_extend (l, ty, row0) ->
+    Tye_row_extend (l, embed_ty_exn env ty, embed_ty_exn env row0)
   | Ty_quan_var id -> Tye_quan_var id
   | Ty_weak_var _ -> assert false
 ;;
@@ -60,6 +69,10 @@ let inst_tye tye =
     | Tye_const name -> Tye_const name
     | Tye_app (tye1, tye2s) -> Tye_app (aux tye1, List.map tye2s ~f:aux)
     | Tye_arrow (tye1, tye2) -> Tye_arrow (aux tye1, aux tye2)
+    | Tye_record row -> Tye_record (aux row)
+    | Tye_variant row -> Tye_variant (aux row)
+    | Tye_row_empty -> Tye_row_empty
+    | Tye_row_extend (l, ty, row0) -> Tye_row_extend (l, aux ty, aux row0)
     | Tye_quan_var id ->
       (match Hashtbl.find tbl id with
       | Some v -> v
@@ -77,6 +90,10 @@ let rec gen_tye = function
   | Tye_const name -> Tye_const name
   | Tye_app (tye1, tye2s) -> Tye_app (gen_tye tye1, List.map tye2s ~f:gen_tye)
   | Tye_arrow (tye1, tye2) -> Tye_arrow (gen_tye tye1, gen_tye tye2)
+  | Tye_record row -> Tye_record (gen_tye row)
+  | Tye_variant row -> Tye_variant (gen_tye row)
+  | Tye_row_empty -> Tye_row_empty
+  | Tye_row_extend (l, ty, row0) -> Tye_row_extend (l, gen_tye ty, gen_tye row0)
   | Tye_quan_var id -> Tye_quan_var id
   | Tye_var ({ contents = Tyv_link tye0 } as r) ->
     let tye0' = gen_tye tye0 in
@@ -97,6 +114,10 @@ let rec deref_tye tye =
     | Tye_const name -> Ast.Ty_const name
     | Tye_app (tye1, tye2s) -> Ty_app (deref_tye tye1, List.map tye2s ~f:deref_tye)
     | Tye_arrow (tye1, tye2) -> Ty_arrow (deref_tye tye1, deref_tye tye2)
+    | Tye_record row -> Ty_record (deref_tye row)
+    | Tye_variant row -> Ty_variant (deref_tye row)
+    | Tye_row_empty -> Ty_row_empty
+    | Tye_row_extend (l, ty, row0) -> Ty_row_extend (l, deref_tye ty, deref_tye row0)
     | Tye_quan_var id -> Ty_quan_var id
     | Tye_var { contents = Tyv_link tye0 } -> (deref_tye tye0).ty_desc
     | Tye_var { contents = Tyv_unbound (id, _) } -> Ty_weak_var id
@@ -108,6 +129,10 @@ let rec occur r1 = function
   | Tye_const _ -> false
   | Tye_app (tye21, tye22s) -> occur r1 tye21 || List.exists tye22s ~f:(occur r1)
   | Tye_arrow (tye21, tye22) -> occur r1 tye21 || occur r1 tye22
+  | Tye_record row -> occur r1 row
+  | Tye_variant row -> occur r1 row
+  | Tye_row_empty -> false
+  | Tye_row_extend (_, ty, row0) -> occur r1 ty || occur r1 row0
   | Tye_quan_var _ -> false
   | Tye_var r2 when phys_equal r1 r2 -> true
   | Tye_var { contents = Tyv_link tye20 } -> occur r1 tye20
@@ -131,6 +156,25 @@ let rec unify_exn ~loc tye1 tye2 =
   | Tye_arrow (tye11, tye12), Tye_arrow (tye21, tye22) ->
     unify_exn ~loc tye11 tye21;
     unify_exn ~loc tye12 tye22
+  | Tye_record row1, Tye_record row2 -> unify_exn ~loc row1 row2
+  | Tye_variant row1, Tye_variant row2 -> unify_exn ~loc row1 row2
+  | Tye_row_empty, Tye_row_empty -> ()
+  | Tye_row_empty, Tye_row_extend (l2, _, _) ->
+    raise @@ Type_error ("row does not contain label " ^ l2, loc)
+  | Tye_row_extend (l1, _, _), Tye_row_empty ->
+    raise @@ Type_error ("row does not contain label " ^ l1, loc)
+  | Tye_row_extend (l1, ty1, row10), (Tye_row_extend _ as row2) ->
+    let row10_r_opt =
+      match row10 with
+      | Tye_var ({ contents = Tyv_unbound _ } as r) -> Some r
+      | _ -> None
+    in
+    let row20 = rewrite_row_exn ~loc row2 l1 ty1 in
+    (match row10_r_opt with
+    | Some { contents = Tyv_link _ } ->
+      raise @@ Type_error ("cannot handle recursive types", loc)
+    | _ -> ());
+    unify_exn ~loc row10 row20
   | Tye_quan_var id1, Tye_quan_var id2 when id1 = id2 -> ()
   | Tye_var r1, Tye_var r2 when phys_equal r1 r2 -> ()
   | Tye_var { contents = Tyv_link tye10 }, _ -> unify_exn ~loc tye10 tye2
@@ -142,6 +186,21 @@ let rec unify_exn ~loc tye1 tye2 =
     if occur r2 tye1 then raise @@ Type_error ("cannot handle recursive types", loc);
     r2 := Tyv_link tye1
   | _, _ -> raise @@ Type_error ("cannot unify types", loc)
+
+and rewrite_row_exn ~loc row l ty =
+  match row with
+  | Tye_row_empty -> raise @@ Type_error ("row does not contain label " ^ l, loc)
+  | Tye_row_extend (l', ty', row0) when String.(l = l') ->
+    unify_exn ~loc ty ty';
+    row0
+  | Tye_row_extend (l', ty', row0) ->
+    Tye_row_extend (l', ty', rewrite_row_exn ~loc row0 l ty)
+  | Tye_var { contents = Tyv_link row0 } -> rewrite_row_exn ~loc row0 l ty
+  | Tye_var ({ contents = Tyv_unbound (_, level) } as r) ->
+    let row0 = Tye_var (ref (Tyv_unbound (Ast.fresh_ty_id (), level))) in
+    r := Tyv_link (Tye_row_extend (l, ty, row0));
+    row0
+  | _ -> assert false
 ;;
 
 let rec g_term_exn env tm =
@@ -169,6 +228,55 @@ let rec g_term_exn env tm =
       unify_exn ~loc:tm1.term_loc gen_tye1 tye1;
       let tm2', tye2 = g_term_exn (Env.add_var_type_bind env x gen_tye1) tm2 in
       Tm_let (tm1', (x, tm2')), tye2
+    | Tm_record_empty -> Tm_record_empty, Tye_record Tye_row_empty
+    | Tm_record_extend (l, tm1, tm2) ->
+      let tm1', tye1 = g_term_exn env tm1 in
+      let tm2', tye2 = g_term_exn env tm2 in
+      let row0 = fresh_var () in
+      unify_exn ~loc:tm2.term_loc (Tye_record row0) tye2;
+      Tm_record_extend (l, tm1', tm2'), Tye_record (Tye_row_extend (l, tye1, row0))
+    | Tm_record_select (tm0, l) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let row0 = fresh_var () in
+      let tye_res = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_record (Tye_row_extend (l, tye_res, row0))) tye0;
+      Tm_record_select (tm0', l), tye_res
+    | Tm_record_restrict (tm0, l) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let row0 = fresh_var () in
+      let tye_rem = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_record (Tye_row_extend (l, tye_rem, row0))) tye0;
+      Tm_record_restrict (tm0', l), Tye_record row0
+    | Tm_variant (l, tm0) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let row0 = fresh_var () in
+      Ast.Tm_variant (l, tm0'), Tye_variant (Tye_row_extend (l, tye0, row0))
+    | Tm_case (tm0, pat_cases, default_case_opt) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye_res = fresh_var () in
+      let row0, default_case_opt' =
+        match default_case_opt with
+        | None -> Tye_row_empty, None
+        | Some (x, default_case_tm) ->
+          let row0 = fresh_var () in
+          let tm', tye =
+            g_term_exn (Env.add_var_type_bind env x (Tye_variant row0)) default_case_tm
+          in
+          unify_exn ~loc:default_case_tm.term_loc tye_res tye;
+          row0, Some (x, tm')
+      in
+      let row, pat_cases' =
+        List.fold_right
+          pat_cases
+          ~init:(row0, [])
+          ~f:(fun (l, x, pat_case_tm) (acc_row, acc_pat_cases) ->
+            let tye_x = fresh_var () in
+            let tm', tye = g_term_exn (Env.add_var_type_bind env x tye_x) pat_case_tm in
+            unify_exn ~loc:pat_case_tm.term_loc tye_res tye;
+            Tye_row_extend (l, tye_x, acc_row), (l, x, tm') :: acc_pat_cases)
+      in
+      unify_exn ~loc:tm0.term_loc (Tye_variant row) tye0;
+      Tm_case (tm0', pat_cases', default_case_opt'), tye_res
   in
   { term_desc = term_desc'; term_ty = tye; term_loc = tm.term_loc }, tye
 ;;
