@@ -34,6 +34,7 @@ let rec loop lexbuf checkpoint =
    fun terminal ->
     match terminal with
     | T_error -> None
+    | T_TYVAR -> Some "type variable"
     | T_TYPE -> Some "keyword \"type\""
     | T_SEMICOLON -> Some "semicolon"
     | T_RPAREN -> Some "right-parenthesis"
@@ -50,8 +51,8 @@ let rec loop lexbuf checkpoint =
     | T_COLON -> Some "colon"
   in
   let string_of_nonterminal : type a. a I.nonterminal -> string option = function
-    | N_ty | N_simple_ty -> Some "a type"
-    | N_term | N_simple_term -> Some "a term"
+    | N_ty_exn | N_ty | N_simple_ty -> Some "a type"
+    | N_term_exn | N_term | N_simple_term -> Some "a term"
     | N_separated_nonempty_list_COMMA_ty_ -> Some "a list of types"
     | N_list_dec_ | N_file_exn -> Some "a list of commands"
     | N_dec_exn | N_dec -> Some "a command"
@@ -122,5 +123,7 @@ let wrap_menhir entry_exn lexbuf =
         raise (Gra_error ("syntax error", loc)))
 ;;
 
+let ty = wrap_menhir Parser.Incremental.ty_exn
+let term = wrap_menhir Parser.Incremental.term_exn
 let dec = wrap_menhir Parser.Incremental.dec_exn
 let file = wrap_menhir Parser.Incremental.file_exn

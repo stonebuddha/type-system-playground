@@ -1,6 +1,6 @@
-(executable
- (name main)
- (libraries repl menhirLib)
+(executables
+ (names main test)
+ (libraries repl menhirLib ounit2)
  (preprocess
   (pps ppx_jane)))
 

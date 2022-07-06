@@ -1,7 +1,7 @@
 open Core
 
 module Lang = struct
-  let name = "stlc"
+  let name = "hindley-milner"
 
   type command = Ast.untyped_dec
   type environment = Infer.Env.t
@@ -14,7 +14,7 @@ module Lang = struct
     Result.try_with (fun () -> snd (Infer.f_dec_exn ~verbose from cmd))
   ;;
 
-  let preludes = []
+  let preludes = [ "test/prelude.txt" ]
 end
 
 module Top = Repl.Make (Lang)

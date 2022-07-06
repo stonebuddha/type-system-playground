@@ -8,7 +8,7 @@ let make_loc (start_pos, end_pos) =
   }
 ;;
 
-let mk_ty ~loc ty_desc = { ty_desc; ty_loc = make_loc loc }
+let mk_ty ~loc gen_ty_desc tbl = { ty_desc = gen_ty_desc tbl; ty_loc = make_loc loc }
 let mk_term ~loc term_desc = { term_desc; term_ty = (); term_loc = make_loc loc }
 let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %}
@@ -27,7 +27,10 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token RPAREN                       ")"
 %token SEMICOLON                    ";"
 %token TYPE                         "type"
+%token <string> TYVAR               "'tyvar" (* just an example *)
 
+%start <ty> ty_exn
+%start <untyped_term> term_exn
 %start <untyped_dec> dec_exn
 %start <untyped_dec list> file_exn
 
@@ -37,12 +40,16 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %inline mk_term(symb): symb { mk_term ~loc:$sloc $1 }
 %inline mk_dec(symb): symb { mk_dec ~loc:$sloc $1 }
 
+ty_exn:
+  | ty EOF
+    { $1 (Core.String.Table.create ()) }
+
 ty:
   | simple_ty
     { $1 }
   | mk_ty(
       simple_ty MINUSGREATER ty
-      { Ty_arrow ($1, $3) }
+      { fun tbl -> Ty_arrow ($1 tbl, $3 tbl) }
     )
     { $1 }
 
@@ -51,10 +58,22 @@ simple_ty:
     { $2 }
   | mk_ty(
       IDENT
-      { Ty_const $1 }
+      { fun _ -> Ty_const $1 }
     | simple_ty LPAREN separated_nonempty_list(COMMA, ty) RPAREN
-      { Ty_app ($1, $3) }
+      { fun tbl -> Ty_app ($1 tbl, Core.List.map $3 ~f:(fun g -> g tbl)) }
+    | TYVAR
+      { fun tbl ->
+          match Core.Hashtbl.find tbl $1 with
+          | Some v -> v
+          | None ->
+            let v = Ty_quan_var (fresh_ty_id ()) in
+            Core.Hashtbl.add_exn tbl ~key:$1 ~data:v;
+            v }
     )
+    { $1 }
+
+term_exn:
+  | term EOF
     { $1 }
 
 term:
@@ -94,7 +113,7 @@ dec:
     | TYPE IDENT SEMICOLON
       { Dec_type $2 }
     | DECL IDENT COLON ty SEMICOLON
-      { Dec_decl ($2, $4) }
+      { Dec_decl ($2, $4 (Core.String.Table.create ())) }
     )
     { $1 }
 

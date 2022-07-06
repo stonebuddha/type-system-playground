@@ -62,6 +62,8 @@ rule token_exn = parse
           kwd
       | None ->
           Parser.IDENT name }
+  | '\'' ((lower | upper) (lower | upper | digit | '_' | '\'')* as name)
+    { Parser.TYVAR name }
   | "->"
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
   | [':' ',' '=' '(' ')' ';']
