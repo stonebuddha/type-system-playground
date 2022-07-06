@@ -1,0 +1,11 @@
+(executable
+ (name main)
+ (libraries repl menhirLib)
+ (preprocess
+  (pps ppx_jane)))
+
+(menhir
+ (flags --table --inspection)
+ (modules parser))
+
+(ocamllex lexer)
