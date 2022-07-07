@@ -1,28 +1,28 @@
 let append = fun l1 -> fun l2 ->
   iter l1 (
     nil -> l2
-  | cons(h, _) with res -> cons(h, res)
+  | cons(d, h, _) with res -> cons(d, h, res)
   )
 ;
 
-let snoc = fun l -> fun b ->
+let snoc = fun d -> fun l -> fun b ->
   iter l (
-    nil -> cons(b, nil)
-  | cons(h, _) with res -> cons(h, res)
+    nil -> cons(d, b, nil)
+  | cons(d, h, _) with res -> cons(d, h, res)
   )
 ;
 
 let append_slow = fun l2 ->
   iter l2 (
     nil -> fun l1 -> l1
-  | cons(h, _) with res -> fun l1 -> res(snoc(l1)(h))
+  | cons(d, h, _) with res -> fun l1 -> res(snoc(d)(l1)(h))
   )
 ;
 
 let rev_aux = fun l ->
   iter l (
     nil -> fun acc -> acc
-  | cons(h, _) with res -> fun acc -> res(cons(h, acc))
+  | cons(d, h, _) with res -> fun acc -> res(cons(d, h, acc))
   )
 ;
 
@@ -32,28 +32,29 @@ let le = fun l1 ->
   let res1 =
     iter l1 (
       nil -> (fun l2 -> true * nil * l2) & nil
-    | cons(h1, _) with res1 ->
+    | cons(d1, h1, _) with res1 ->
       (
         fun l2 ->
         let res2 =
           iter l2 (
-            nil -> (false * cons(h1, res1.r) * nil) & (nil * h1 * res1)
-          | cons(h2, _) with res2 ->
+            nil -> (false * cons(d1, h1, res1.r) * nil) & (nil * d1 * h1 * res1)
+          | cons(d2, h2, _) with res2 ->
             let t2 * tmp = res2.r in
+            let d1 * tmp = tmp in
             let h1 * res1 = tmp in
             (
               let cmp * tmp = res1.l(t2) in
               let t1 * t2 = tmp in
-              cmp * cons(h1, t1) * cons(h2, t2)
+              cmp * cons(d1, h1, t1) * cons(d2, h2, t2)
             )
             &
-            (cons(h2, t2) * h1 * res1)
+            (cons(d2, h2, t2) * d1 * h1 * res1)
           )
         in
         res2.l
       )
       &
-      cons(h1, res1.r)
+      cons(d1, h1, res1.r)
     )
   in
   res1.l
@@ -62,13 +63,13 @@ let le = fun l1 ->
 let insert = fun l ->
   let p =
     iter l (
-      nil -> (fun x -> cons(x, nil)) & nil
-    | cons(y, _) with res -> (fun x ->
+      nil -> (fun d -> fun x -> cons(d, x, nil)) & nil
+    | cons(d, y, _) with res -> (fun d' -> fun x ->
         let le * tmp = le(x)(y) in
         let x * y = tmp in
         if le
-        then cons(x, cons(y, res.r))
-        else cons(y, res.l(x))) & cons(y, res.r)
+        then cons(d', x, cons(d, y, res.r))
+        else cons(d, y, res.l(d')(x))) & cons(d, y, res.r)
     )
   in
   p.l
@@ -77,7 +78,7 @@ let insert = fun l ->
 let sort = fun l ->
   iter l (
     nil -> nil
-  | cons(a, _) with res -> insert(res)(a)
+  | cons(d, a, _) with res -> insert(res)(d)(a)
   )
 ;
 
@@ -85,11 +86,11 @@ let app_tail = fun f -> fun l ->
   let l * is_tail =
     iter l (
       nil -> nil * inl f
-    | cons(h, _) with res ->
+    | cons(d, h, _) with res ->
       let t * is_tail = res in
       case is_tail (
-        inl f -> cons(f(h), t) * inr false
-      | inr tmp -> cons(h, t) * inr tmp
+        inl f -> cons(d, f(h), t) * inr false
+      | inr tmp -> cons(d, h, t) * inr tmp
       )
     )
   in
@@ -99,30 +100,26 @@ let app_tail = fun f -> fun l ->
 let compose_list = fun l ->
   iter l (
     nil -> fun a -> a
-  | cons(f, _) with res -> fun a -> f(res(a))
+  | cons(d, f, _) with res -> fun a -> f(d * res(a))
   )
 ;
 
-let dup_2 = fun (l: list(bool)) ->
+let dup_2 = fun (l: list(<> * bool)) ->
   iter l (
     nil -> nil
-  | cons(h, _) with res -> cons(h, cons(h, res))
+  | cons(d1, h, _) with res ->
+    let d2 * h = h in
+    cons(d1, h, cons(d2, h, res))
   )
 ;
 
-let dup_exp = fun l ->
-  iter l (
-    nil -> cons(true, nil)
-  | cons(h, _) with res -> dup_2(res)
-  )
-;
-
-let copy_2 = fun (l: list(bool)) ->
+let copy_2 = fun (l: list(<> * bool)) ->
   iter l (
     nil -> nil * nil
-  | cons(h, _) with res ->
+  | cons(d1, h, _) with res ->
+    let d2 * h = h in
     let l1 * l2 = res in
-    cons(h, l1) * cons(h, l2)
+    cons(d1, h, l1) * cons(d2, h, l2)
   )
 ;
 
@@ -131,13 +128,15 @@ let self_append_2 = fun l ->
   append(l1)(l2)
 ;
 
-let copy_3 = fun (l: list(bool)) ->
+let copy_3 = fun (l: list(<> * <> * bool)) ->
   iter l (
     nil -> nil * nil * nil
-  | cons(h, _) with res ->
+  | cons(d1, h, _) with res ->
+    let d2 * h = h in
+    let d3 * h = h in
     let l1 * tmp = res in
     let l2 * l3 = tmp in
-    cons(h, l1) * cons(h, l2) * cons(h, l3)
+    cons(d1, h, l1) * cons(d2, h, l2) * cons(d3, h, l3)
   )
 ;
 

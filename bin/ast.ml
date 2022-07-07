@@ -13,6 +13,7 @@ and ty_desc =
   | Ty_lolli of ty * ty (** multiplicative disjunction: t1 -o t2 *)
   | Ty_with of ty * ty (** additive conjunction: t1 & t2 *)
   | Ty_plus of ty * ty (** additive disjunction: t1 + t2 *)
+  | Ty_diamond (** precious little diamond: <> *)
 
 type 'ty term =
   { term_desc : 'ty term_desc
@@ -25,9 +26,9 @@ and 'ty term_desc =
   | Tm_bool of bool (** Boolean constant: true, false *)
   | Tm_cond of 'ty term * 'ty term * 'ty term (** conditional: if e0 then e1 else e2 *)
   | Tm_nil (** empty list: nil) *)
-  | Tm_cons of 'ty term * 'ty term (** cons list: cons(e1, e2) *)
-  | Tm_iter of 'ty term * 'ty term * (string * string * 'ty term)
-      (** list iteration: iter e0 ( nil -> e1 | cons(x, _) with y -> e2 ) *)
+  | Tm_cons of 'ty term * 'ty term * 'ty term (** cons list: cons(d, e1, e2) *)
+  | Tm_iter of 'ty term * 'ty term * (string * string * string * 'ty term)
+      (** list iteration: iter e0 ( nil -> e1 | cons(d, x, _) with y -> e2 ) *)
   | Tm_tensor of 'ty term * 'ty term (** tensor introduction: e1 * e2 *)
   | Tm_letp of 'ty term * (string * string * 'ty term)
       (** tensor elimination: let x1 * x2 = e0 in e1 *)
@@ -76,6 +77,7 @@ let string_of_ty =
     | Ty_const name -> name
     | Ty_bool -> "bool"
     | Ty_list ty0 -> "list(" ^ aux ty0 ^ ")"
+    | Ty_diamond -> "<>"
     | _ -> "(" ^ aux ty ^ ")"
   in
   aux
@@ -89,8 +91,9 @@ let map_ty_term ~f =
         | Tm_bool b -> Tm_bool b
         | Tm_cond (tm0, tm1, tm2) -> Tm_cond (aux tm0, aux tm1, aux tm2)
         | Tm_nil -> Tm_nil
-        | Tm_cons (tm1, tm2) -> Tm_cons (aux tm1, aux tm2)
-        | Tm_iter (tm0, tm1, (x, y, tm2)) -> Tm_iter (aux tm0, aux tm1, (x, y, aux tm2))
+        | Tm_cons (tm0, tm1, tm2) -> Tm_cons (aux tm0, aux tm1, aux tm2)
+        | Tm_iter (tm0, tm1, (d, x, y, tm2)) ->
+          Tm_iter (aux tm0, aux tm1, (d, x, y, aux tm2))
         | Tm_tensor (tm1, tm2) -> Tm_tensor (aux tm1, aux tm2)
         | Tm_letp (tm0, (x1, x2, tm1)) -> Tm_letp (aux tm0, (x1, x2, aux tm1))
         | Tm_abs (x, ty_opt, tm0) -> Tm_abs (x, ty_opt, aux tm0)

@@ -52,6 +52,7 @@ let heap_free (tye, is_top) =
     | Tye_lolli (_, _) -> false
     | Tye_with _ -> false
     | Tye_plus (tye1, tye2) -> aux tye1 && aux tye2
+    | Tye_diamond -> false
     | Tye_var { contents = Tyv_link tye0 } -> aux tye0
     | Tye_var { contents = Tyv_unbound _ } -> false
   in
@@ -71,11 +72,12 @@ let rec g_term_exn env tm =
     let env'2 = g_term_exn env'0 tm2 in
     Env.meet_var_type_binds env'1 env'2
   | Tm_nil -> env
-  | Tm_cons (tm1, tm2) ->
-    let env'1 = g_term_exn env tm1 in
+  | Tm_cons (tm0, tm1, tm2) ->
+    let env'0 = g_term_exn env tm0 in
+    let env'1 = g_term_exn env'0 tm1 in
     let env'2 = g_term_exn env'1 tm2 in
     env'2
-  | Tm_iter (tm0, tm1, (x, y, tm2)) ->
+  | Tm_iter (tm0, tm1, (d, x, y, tm2)) ->
     let env'0 = g_term_exn env tm0 in
     let env'1 = g_term_exn env'0 tm1 in
     (match tm0.term_ty with
@@ -83,7 +85,10 @@ let rec g_term_exn env tm =
       let (_ : _) =
         g_term_exn
           (Env.add_var_type_bind
-             (Env.add_var_type_bind (Env.mask_non_top_type_binds env'1) x tye)
+             (Env.add_var_type_bind
+                (Env.add_var_type_bind (Env.mask_non_top_type_binds env'1) d Tye_diamond)
+                x
+                tye)
              y
              tm1.term_ty)
           tm2

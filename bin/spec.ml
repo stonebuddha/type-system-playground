@@ -1,7 +1,7 @@
 open Core
 
 module Lang = struct
-  let name = "ltlc"
+  let name = "non-size-increasing"
 
   type command = Ast.untyped_dec
   type environment = Infer.Env.t * Analyze.Env.t

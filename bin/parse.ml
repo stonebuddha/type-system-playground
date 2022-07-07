@@ -47,6 +47,7 @@ let rec loop lexbuf checkpoint =
     | T_LPAREN -> Some "left-parenthesis"
     | T_LIST -> Some "keyword \"list\""
     | T_LET -> Some "keyword \"let\""
+    | T_LESSGREATER -> Some "diamond"
     | T_ITER -> Some "keyword \"iter\""
     | T_INR -> Some "keyword \"inr\""
     | T_INL -> Some "keyword \"inl\""

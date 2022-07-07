@@ -25,6 +25,7 @@ let symbol_table =
     ; "inr", Parser.INR
     ; "iter", Parser.ITER
     ; "let", Parser.LET
+    ; "<>", Parser.LESSGREATER
     ; "list", Parser.LIST
     ; "(", Parser.LPAREN
     ; "->", Parser.MINUSGREATER
@@ -83,7 +84,7 @@ rule token_exn = parse
           kwd
       | None ->
           Parser.IDENT name }
-  | ".l" | ".r" | "->" | "-o"
+  | ".l" | ".r" | "<>" | "->" | "-o"
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
   | ['&' '*' '|' ':' ',' '=' '(' '+' ')' ';' '_']
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }

@@ -27,6 +27,7 @@ type tyexp =
   | Tye_lolli of tyexp * tyexp
   | Tye_with of tyexp * tyexp
   | Tye_plus of tyexp * tyexp
+  | Tye_diamond
   | Tye_var of tyvar ref
 
 and tyvar =
@@ -52,6 +53,7 @@ let rec embed_ty ty =
   | Ty_lolli (ty1, ty2) -> Tye_lolli (embed_ty ty1, embed_ty ty2)
   | Ty_with (ty1, ty2) -> Tye_with (embed_ty ty1, embed_ty ty2)
   | Ty_plus (ty1, ty2) -> Tye_plus (embed_ty ty1, embed_ty ty2)
+  | Ty_diamond -> Tye_diamond
 ;;
 
 let rec deref_tye tye =
@@ -63,6 +65,7 @@ let rec deref_tye tye =
     | Tye_lolli (tye1, tye2) -> Ty_lolli (deref_tye tye1, deref_tye tye2)
     | Tye_with (tye1, tye2) -> Ty_with (deref_tye tye1, deref_tye tye2)
     | Tye_plus (tye1, tye2) -> Ty_plus (deref_tye tye1, deref_tye tye2)
+    | Tye_diamond -> Ty_diamond
     | Tye_var { contents = Tyv_link tye0 } -> (deref_tye tye0).ty_desc
     | Tye_var { contents = Tyv_unbound id } -> Ty_const ("_weak" ^ Int.to_string id)
   in
@@ -77,6 +80,7 @@ let rec delink_tye tye =
   | Tye_lolli (tye1, tye2) -> Tye_lolli (delink_tye tye1, delink_tye tye2)
   | Tye_with (tye1, tye2) -> Tye_with (delink_tye tye1, delink_tye tye2)
   | Tye_plus (tye1, tye2) -> Tye_plus (delink_tye tye1, delink_tye tye2)
+  | Tye_diamond -> Tye_diamond
   | Tye_var { contents = Tyv_link tye0 } -> delink_tye tye0
   | Tye_var ({ contents = Tyv_unbound _ } as r) -> Tye_var r
 ;;
@@ -88,6 +92,7 @@ let rec occur r1 = function
   | Tye_lolli (tye21, tye22)
   | Tye_with (tye21, tye22)
   | Tye_plus (tye21, tye22) -> occur r1 tye21 || occur r1 tye22
+  | Tye_diamond -> false
   | Tye_var r2 when phys_equal r1 r2 -> true
   | Tye_var { contents = Tyv_link tye20 } -> occur r1 tye20
   | Tye_var { contents = Tyv_unbound _ } -> false
@@ -103,6 +108,7 @@ let rec unify_exn ~loc tye1 tye2 =
   | Tye_plus (tye11, tye12), Tye_plus (tye21, tye22) ->
     unify_exn ~loc tye11 tye21;
     unify_exn ~loc tye12 tye22
+  | Tye_diamond, Tye_diamond -> ()
   | Tye_var r1, Tye_var r2 when phys_equal r1 r2 -> ()
   | Tye_var { contents = Tyv_link tye10 }, _ -> unify_exn ~loc tye10 tye2
   | _, Tye_var { contents = Tyv_link tye20 } -> unify_exn ~loc tye1 tye20
@@ -133,21 +139,28 @@ let rec g_term_exn env tm =
     | Tm_nil ->
       let tye0 = fresh_var () in
       Tm_nil, Tye_list tye0
-    | Tm_cons (tm1, tm2) ->
+    | Tm_cons (tm0, tm1, tm2) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      unify_exn ~loc:tm0.term_loc Tye_diamond tye0;
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 = g_term_exn env tm2 in
       unify_exn ~loc:tm2.term_loc (Tye_list tye1) tye2;
-      Tm_cons (tm1', tm2'), Tye_list tye1
-    | Tm_iter (tm0, tm1, (x, y, tm2)) ->
+      Tm_cons (tm0', tm1', tm2'), Tye_list tye1
+    | Tm_iter (tm0, tm1, (d, x, y, tm2)) ->
       let tm0', tye0 = g_term_exn env tm0 in
       let tye = fresh_var () in
       unify_exn ~loc:tm0.term_loc (Tye_list tye) tye0;
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 =
-        g_term_exn (Env.add_var_type_bind (Env.add_var_type_bind env x tye) y tye1) tm2
+        g_term_exn
+          (Env.add_var_type_bind
+             (Env.add_var_type_bind (Env.add_var_type_bind env d Tye_diamond) x tye)
+             y
+             tye1)
+          tm2
       in
       unify_exn ~loc:tm2.term_loc tye1 tye2;
-      Tm_iter (tm0', tm1', (x, y, tm2')), tye1
+      Tm_iter (tm0', tm1', (d, x, y, tm2')), tye1
     | Tm_tensor (tm1, tm2) ->
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 = g_term_exn env tm2 in

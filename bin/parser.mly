@@ -36,6 +36,7 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token INR                          "inr"
 %token ITER                         "iter"
 %token LET                          "let"
+%token LESSGREATER                  "<>"
 %token LIST                         "list"
 %token LPAREN                       "("
 %token MINUSGREATER                 "->"
@@ -95,6 +96,8 @@ simple_ty:
       { Ty_bool }
     | LIST LPAREN ty RPAREN
       { Ty_list $3 }
+    | LESSGREATER
+      { Ty_diamond }
     )
     { $1 }
 
@@ -104,8 +107,8 @@ term:
   | mk_term(
       IF term THEN term ELSE term
       { Tm_cond ($2, $4, $6) }
-    | ITER simple_term LPAREN NIL MINUSGREATER term BAR CONS LPAREN IDENT COMMA UNDERSCORE RPAREN WITH IDENT MINUSGREATER term RPAREN
-      { Tm_iter ($2, $6, ($10, $15, $17)) }
+    | ITER simple_term LPAREN NIL MINUSGREATER term BAR CONS LPAREN IDENT COMMA IDENT COMMA UNDERSCORE RPAREN WITH IDENT MINUSGREATER term RPAREN
+      { Tm_iter ($2, $6, ($10, $12, $17, $19)) }
     | simple_term ASTERISK term
       { Tm_tensor ($1, $3) }
     | LET IDENT ASTERISK IDENT EQUAL term IN term
@@ -139,8 +142,8 @@ simple_term:
       { Tm_bool false }
     | NIL
       { Tm_nil }
-    | CONS LPAREN term COMMA term RPAREN
-      { Tm_cons ($3, $5) }
+    | CONS LPAREN term COMMA term COMMA term RPAREN
+      { Tm_cons ($3, $5, $7) }
     | simple_term LPAREN term RPAREN
       { Tm_app ($1, $3) }
     | simple_term DOTL
