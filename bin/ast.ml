@@ -14,6 +14,12 @@ and ty_desc =
   | Ty_with of ty * ty (** additive conjunction: t1 & t2 *)
   | Ty_plus of ty * ty (** additive disjunction: t1 + t2 *)
 
+(** toplevel function type: (t1, t2) -> t0 *)
+type fun_ty =
+  { fun_ty_desc : ty list * ty
+  ; fun_ty_loc : Location.t
+  }
+
 type 'ty term =
   { term_desc : 'ty term_desc
   ; term_ty : 'ty
@@ -26,8 +32,8 @@ and 'ty term_desc =
   | Tm_cond of 'ty term * 'ty term * 'ty term (** conditional: if e0 then e1 else e2 *)
   | Tm_nil (** empty list: nil) *)
   | Tm_cons of 'ty term * 'ty term (** cons list: cons(e1, e2) *)
-  | Tm_iter of 'ty term * 'ty term * (string * string * 'ty term)
-      (** list iteration: iter e0 ( nil -> e1 | cons(x, _) with y -> e2 ) *)
+  | Tm_matl of 'ty term * 'ty term * (string * string * 'ty term)
+      (** list elimination: case e0 ( nil -> e1 | cons(x, y) -> e2 ) *)
   | Tm_tensor of 'ty term * 'ty term (** tensor introduction: e1 * e2 *)
   | Tm_letp of 'ty term * (string * string * 'ty term)
       (** tensor elimination: let x1 * x2 = e0 in e1 *)
@@ -41,21 +47,25 @@ and 'ty term_desc =
   | Tm_case of 'ty term * (string * 'ty term) * (string * 'ty term)
       (** plus elimination: case e0 ( inl x1 -> e1 | inr x2 -> e2 ) *)
   | Tm_let of 'ty term * (string * 'ty term) (** let: let x = e_1 in e_2 *)
+  | Tm_call of string * 'ty term list (** function call: f(e1, e2, e3) *)
 
 type untyped_term = unit term
 type typed_term = ty term
 
-type 'ty dec =
-  { dec_desc : 'ty dec_desc
+type ('fun_ty, 'ty) dec =
+  { dec_desc : ('fun_ty, 'ty) dec_desc
   ; dec_loc : Location.t
   }
 
-and 'ty dec_desc =
-  | Dec_val of string option * 'ty term
-  | Dec_decl of string * ty * 'ty
+and ('fun_ty, 'ty) dec_desc =
+  | Dec_defn of string * (string * ty option) list * ty option * 'fun_ty * 'ty term
 
-type untyped_dec = unit dec
-type typed_dec = ty dec
+type untyped_dec = (unit, unit) dec
+type typed_dec = (fun_ty, ty) dec
+
+type cmd =
+  | Cmd_dec of untyped_dec
+  | Cmd_show_type of string
 
 let string_of_ty =
   let rec aux ty =
@@ -81,6 +91,14 @@ let string_of_ty =
   aux
 ;;
 
+let string_of_fun_ty { fun_ty_desc = arg_tys, res_ty; _ } =
+  (match arg_tys with
+  | [ arg_ty ] -> string_of_ty arg_ty
+  | _ -> "(" ^ String.concat ~sep:", " (List.map arg_tys ~f:string_of_ty) ^ ")")
+  ^ " -> "
+  ^ string_of_ty res_ty
+;;
+
 let map_ty_term ~f =
   let rec aux { term_desc; term_ty; term_loc } =
     { term_desc =
@@ -90,7 +108,7 @@ let map_ty_term ~f =
         | Tm_cond (tm0, tm1, tm2) -> Tm_cond (aux tm0, aux tm1, aux tm2)
         | Tm_nil -> Tm_nil
         | Tm_cons (tm1, tm2) -> Tm_cons (aux tm1, aux tm2)
-        | Tm_iter (tm0, tm1, (x, y, tm2)) -> Tm_iter (aux tm0, aux tm1, (x, y, aux tm2))
+        | Tm_matl (tm0, tm1, (x, y, tm2)) -> Tm_matl (aux tm0, aux tm1, (x, y, aux tm2))
         | Tm_tensor (tm1, tm2) -> Tm_tensor (aux tm1, aux tm2)
         | Tm_letp (tm0, (x1, x2, tm1)) -> Tm_letp (aux tm0, (x1, x2, aux tm1))
         | Tm_abs (x, ty_opt, tm0) -> Tm_abs (x, ty_opt, aux tm0)
@@ -102,7 +120,8 @@ let map_ty_term ~f =
         | Tm_inr tm0 -> Tm_inr (aux tm0)
         | Tm_case (tm0, (x1, tm1), (x2, tm2)) ->
           Tm_case (aux tm0, (x1, aux tm1), (x2, aux tm2))
-        | Tm_let (tm1, (x, tm2)) -> Tm_let (aux tm1, (x, aux tm2)))
+        | Tm_let (tm1, (x, tm2)) -> Tm_let (aux tm1, (x, aux tm2))
+        | Tm_call (f, tm0s) -> Tm_call (f, List.map tm0s ~f:aux))
     ; term_ty = f term_ty
     ; term_loc
     }

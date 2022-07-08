@@ -1,154 +1,132 @@
-let append = fun l1 -> fun l2 ->
-  iter l1 (
+Append(l1, l2) =
+  case l1 (
     nil -> l2
-  | cons(h, _) with res -> cons(h, res)
+  | cons(h, t) -> cons(h, Append(t, l2))
   )
 ;
 
-let snoc = fun l -> fun b ->
-  iter l (
+Snoc(l, b) =
+  case l (
     nil -> cons(b, nil)
-  | cons(h, _) with res -> cons(h, res)
+  | cons(h, t) -> cons(h, Snoc(t, b))
   )
 ;
 
-let append_slow = fun l2 ->
-  iter l2 (
-    nil -> fun l1 -> l1
-  | cons(h, _) with res -> fun l1 -> res(snoc(l1)(h))
+AppendSlow(l1, l2) =
+  case l2 (
+    nil -> l1
+  | cons(h, t) -> AppendSlow(Snoc(l1, h), t)
   )
 ;
 
-let rev_aux = fun l ->
-  iter l (
-    nil -> fun acc -> acc
-  | cons(h, _) with res -> fun acc -> res(cons(h, acc))
+RevAux(l, acc) =
+  case l (
+    nil -> acc
+  | cons(h, t) -> RevAux(t, cons(h, acc))
   )
 ;
 
-let reverse = fun l -> rev_aux(l)(nil);
+Reverse(l) = RevAux(l, nil);
 
-let le = fun l1 ->
-  let res1 =
-    iter l1 (
-      nil -> (fun l2 -> true * nil * l2) & nil
-    | cons(h1, _) with res1 ->
-      (
-        fun l2 ->
-        let res2 =
-          iter l2 (
-            nil -> (false * cons(h1, res1.r) * nil) & (nil * h1 * res1)
-          | cons(h2, _) with res2 ->
-            let t2 * tmp = res2.r in
-            let h1 * res1 = tmp in
-            (
-              let cmp * tmp = res1.l(t2) in
-              let t1 * t2 = tmp in
-              cmp * cons(h1, t1) * cons(h2, t2)
-            )
-            &
-            (cons(h2, t2) * h1 * res1)
-          )
-        in
-        res2.l
-      )
-      &
-      cons(h1, res1.r)
+Le(l1, l2) =
+  case l1 (
+    nil -> true * nil * l2
+  | cons(h1, t1) ->
+    case l2 (
+      nil -> false * cons(h1, t1) * nil
+    | cons(h2, t2) ->
+      let cmp * tmp = Le(t1, t2) in
+      let t1 * t2 = tmp in
+      cmp * cons(h1, t1) * cons(h2, t2)
     )
-  in
-  res1.l
+  )
 ;
 
-let insert = fun l ->
-  let p =
-    iter l (
-      nil -> (fun x -> cons(x, nil)) & nil
-    | cons(y, _) with res -> (fun x ->
-        let le * tmp = le(x)(y) in
-        let x * y = tmp in
-        if le
-        then cons(x, cons(y, res.r))
-        else cons(y, res.l(x))) & cons(y, res.r)
-    )
-  in
-  p.l
+Insert(x, l) =
+  case l (
+    nil -> cons(x, nil)
+  | cons(y, t) ->
+    let cmp * tmp = Le(x, y) in
+    let x * y = tmp in
+    if cmp
+    then cons(x, cons(y, t))
+    else cons(y, Insert(x, t))
+  )
 ;
 
-let sort = fun l ->
-  iter l (
+Sort(l) =
+  case l (
     nil -> nil
-  | cons(a, _) with res -> insert(res)(a)
+  | cons(h, t) -> Insert(h, Sort(t))
   )
 ;
 
-let app_tail = fun f -> fun l ->
-  let l * is_tail =
-    iter l (
-      nil -> nil * inl f
-    | cons(h, _) with res ->
-      let t * is_tail = res in
-      case is_tail (
-        inl f -> cons(f(h), t) * inr false
-      | inr tmp -> cons(h, t) * inr tmp
-      )
+AppTail(f, l) =
+  case l (
+    nil -> nil
+  | cons(h, t) ->
+    case t (
+      nil -> cons(f(h), nil)
+    | cons(h', t') -> cons(h, AppTail(f, cons(h', t')))
     )
-  in
-  l
+  )
 ;
 
-let compose_list = fun l ->
-  iter l (
+ComposeList(l) =
+  case l (
     nil -> fun a -> a
-  | cons(f, _) with res -> fun a -> f(res(a))
+  | cons(f, t) -> fun a -> f(ComposeList(t)(a))
   )
 ;
 
-let dup_2 = fun (l: list(bool)) ->
-  iter l (
+Dup2(l: list(bool)) =
+  case l (
     nil -> nil
-  | cons(h, _) with res -> cons(h, cons(h, res))
+  | cons(h, t) -> cons(h, cons(h, Dup2(t)))
   )
 ;
 
-let dup_exp = fun l ->
-  iter l (
+DupExp(l) =
+  case l (
     nil -> cons(true, nil)
-  | cons(h, _) with res -> dup_2(res)
+  | cons(h, t) -> Dup2(DupExp(t))
   )
 ;
 
-let copy_2 = fun (l: list(bool)) ->
-  iter l (
+Copy2(l: list(bool)) =
+  case l (
     nil -> nil * nil
-  | cons(h, _) with res ->
-    let l1 * l2 = res in
+  | cons(h, t) ->
+    let l1 * l2 = Copy2(t) in
     cons(h, l1) * cons(h, l2)
   )
 ;
 
-let self_append_2 = fun l ->
-  let l1 * l2 = copy_2(l) in
-  append(l1)(l2)
+SelfAppend2(l) =
+  let l1 * l2 = Copy2(l) in
+  Append(l1, l2)
 ;
 
-let copy_3 = fun (l: list(bool)) ->
-  iter l (
+Copy3(l: list(bool)) =
+  case l (
     nil -> nil * nil * nil
-  | cons(h, _) with res ->
-    let l1 * tmp = res in
+  | cons(h, t) ->
+    let l1 * tmp = Copy3(t) in
     let l2 * l3 = tmp in
     cons(h, l1) * cons(h, l2) * cons(h, l3)
   )
 ;
 
-let self_append_3 = fun l ->
-  let l1 * tmp = copy_3(l) in
+SelfAppend3(l) =
+  let l1 * tmp = Copy3(l) in
   let l2 * l3 = tmp in
-  append(l1)(append(l2)(l3))
+  Append(l1, Append(l2, l3))
 ;
 
-let self_append_3_slow = fun l ->
-  let l1 * tmp = copy_3(l) in
+SelfAppend3Slow(l) =
+  let l1 * tmp = Copy3(l) in
   let l2 * l3 = tmp in
-  append(append(l1)(l2))(l3)
+  Append(Append(l1, l2), l3)
 ;
+
+Infinite() = Infinite();

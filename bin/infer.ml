@@ -33,12 +33,16 @@ and tyvar =
   | Tyv_link of tyexp
   | Tyv_unbound of Type_id.t
 
-module Env = struct
-  type t = tyexp String.Map.t
+type fun_tyexp = Tye_fun of tyexp list * tyexp
 
-  let empty = String.Map.empty
-  let add_var_type_bind venv x tye = Map.set venv ~key:x ~data:tye
-  let find_var_type_bind venv x = Map.find venv x
+module Env = struct
+  type t = fun_tyexp String.Map.t * tyexp String.Map.t
+
+  let empty = String.Map.empty, String.Map.empty
+  let add_fun_type_bind (fenv, venv) f ftye = Map.set fenv ~key:f ~data:ftye, venv
+  let find_fun_type_bind (fenv, _) f = Map.find fenv f
+  let add_var_type_bind (fenv, venv) x tye = fenv, Map.set venv ~key:x ~data:tye
+  let find_var_type_bind (_, venv) x = Map.find venv x
 end
 
 let fresh_var () = Tye_var (ref (Tyv_unbound (Type_id.fresh ())))
@@ -69,6 +73,12 @@ let rec deref_tye tye =
   { ty_desc; ty_loc = Location.none }
 ;;
 
+let deref_fun_tye (Tye_fun (arg_tyes, res_tye)) =
+  { Ast.fun_ty_desc = List.map arg_tyes ~f:deref_tye, deref_tye res_tye
+  ; fun_ty_loc = Location.none
+  }
+;;
+
 let rec delink_tye tye =
   match tye with
   | Tye_bool -> Tye_bool
@@ -79,6 +89,10 @@ let rec delink_tye tye =
   | Tye_plus (tye1, tye2) -> Tye_plus (delink_tye tye1, delink_tye tye2)
   | Tye_var { contents = Tyv_link tye0 } -> delink_tye tye0
   | Tye_var ({ contents = Tyv_unbound _ } as r) -> Tye_var r
+;;
+
+let delink_fun_tye (Tye_fun (arg_tyes, res_tye)) =
+  Tye_fun (List.map arg_tyes ~f:delink_tye, delink_tye res_tye)
 ;;
 
 let rec occur r1 = function
@@ -138,16 +152,18 @@ let rec g_term_exn env tm =
       let tm2', tye2 = g_term_exn env tm2 in
       unify_exn ~loc:tm2.term_loc (Tye_list tye1) tye2;
       Tm_cons (tm1', tm2'), Tye_list tye1
-    | Tm_iter (tm0, tm1, (x, y, tm2)) ->
+    | Tm_matl (tm0, tm1, (x, y, tm2)) ->
       let tm0', tye0 = g_term_exn env tm0 in
       let tye = fresh_var () in
       unify_exn ~loc:tm0.term_loc (Tye_list tye) tye0;
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 =
-        g_term_exn (Env.add_var_type_bind (Env.add_var_type_bind env x tye) y tye1) tm2
+        g_term_exn
+          (Env.add_var_type_bind (Env.add_var_type_bind env x tye) y (Tye_list tye))
+          tm2
       in
       unify_exn ~loc:tm2.term_loc tye1 tye2;
-      Tm_iter (tm0', tm1', (x, y, tm2')), tye1
+      Tm_matl (tm0', tm1', (x, y, tm2')), tye1
     | Tm_tensor (tm1, tm2) ->
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 = g_term_exn env tm2 in
@@ -212,6 +228,19 @@ let rec g_term_exn env tm =
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 = g_term_exn (Env.add_var_type_bind env x tye1) tm2 in
       Tm_let (tm1', (x, tm2')), tye2
+    | Tm_call (f, tm0s) ->
+      (match Env.find_fun_type_bind env f with
+      | None -> raise @@ Type_error ("function " ^ f ^ " not found", tm.term_loc)
+      | Some (Tye_fun (arg_tyes, res_tye)) ->
+        if List.length tm0s <> List.length arg_tyes
+        then raise @@ Type_error ("arity mismatch", tm.term_loc);
+        let tm'0s_rev =
+          List.fold (List.zip_exn tm0s arg_tyes) ~init:[] ~f:(fun acc (tm0, arg_tye) ->
+              let tm0', tye = g_term_exn env tm0 in
+              unify_exn ~loc:tm0.term_loc arg_tye tye;
+              tm0' :: acc)
+        in
+        Tm_call (f, List.rev tm'0s_rev), res_tye)
   in
   { term_desc = term_desc'; term_ty = tye; term_loc = tm.term_loc }, tye
 ;;
@@ -219,14 +248,28 @@ let rec g_term_exn env tm =
 let g_dec_exn env dec =
   let dec_desc', env' =
     match dec.Ast.dec_desc with
-    | Dec_val (x_opt, tm) ->
-      let tm', tye = g_term_exn env tm in
-      ( Ast.Dec_val (x_opt, Ast.map_ty_term ~f:delink_tye tm')
-      , Option.value_map x_opt ~default:env ~f:(fun x -> Env.add_var_type_bind env x tye)
-      )
-    | Dec_decl (x, ty, _) ->
-      let tye = embed_ty ty in
-      Dec_decl (x, ty, tye), Env.add_var_type_bind env x tye
+    | Dec_defn (f, binds, res_ty_opt, (), tm) ->
+      let params, arg_tyes =
+        List.unzip
+          (List.map binds ~f:(fun (param, arg_ty_opt) ->
+               ( param
+               , match arg_ty_opt with
+                 | None -> fresh_var ()
+                 | Some arg_ty -> embed_ty arg_ty )))
+      in
+      let res_tye =
+        match res_ty_opt with
+        | None -> fresh_var ()
+        | Some res_ty -> embed_ty res_ty
+      in
+      let ftye = Tye_fun (arg_tyes, res_tye) in
+      let env' = Env.add_fun_type_bind env f ftye in
+      let env'' = List.fold2_exn params arg_tyes ~init:env' ~f:Env.add_var_type_bind in
+      let tm', tye = g_term_exn env'' tm in
+      unify_exn ~loc:dec.dec_loc res_tye tye;
+      ( Ast.Dec_defn
+          (f, binds, res_ty_opt, delink_fun_tye ftye, Ast.map_ty_term ~f:delink_tye tm')
+      , env' )
   in
   { Ast.dec_desc = dec_desc'; dec_loc = dec.dec_loc }, env'
 ;;

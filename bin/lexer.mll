@@ -12,7 +12,6 @@ let symbol_table =
     ; ":", Parser.COLON
     ; ",", Parser.COMMA
     ; "cons", Parser.CONS
-    ; "decl", Parser.DECL
     ; ".l", Parser.DOTL
     ; ".r", Parser.DOTR
     ; "else", Parser.ELSE
@@ -23,7 +22,6 @@ let symbol_table =
     ; "in", Parser.IN
     ; "inl", Parser.INL
     ; "inr", Parser.INR
-    ; "iter", Parser.ITER
     ; "let", Parser.LET
     ; "list", Parser.LIST
     ; "(", Parser.LPAREN
@@ -33,10 +31,9 @@ let symbol_table =
     ; "+", Parser.PLUS
     ; ")", Parser.RPAREN
     ; ";", Parser.SEMICOLON
+    ; "#type", Parser.SHOWTYPE
     ; "then", Parser.THEN
     ; "true", Parser.TRUE
-    ; "_", Parser.UNDERSCORE
-    ; "with", Parser.WITH
     ]
 ;;
 
@@ -77,15 +74,17 @@ rule token_exn = parse
     { update_loc lexbuf None 1 false 0; token_exn lexbuf }
   | blank+
     { token_exn lexbuf }
-  | (lower | upper) (lower | upper | digit | '_' | '\'')* as name
+  | lower (lower | upper | digit | '_' | '\'')* as name
     { match Hashtbl.find symbol_table name with
       | Some kwd ->
           kwd
       | None ->
-          Parser.IDENT name }
-  | ".l" | ".r" | "->" | "-o"
+          Parser.LIDENT name }
+  | upper (lower | upper | digit | '_' | '\'')* as name
+    { Parser.UIDENT name }
+  | ".l" | ".r" | "->" | "-o" | "#type"
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
-  | ['&' '*' '|' ':' ',' '=' '(' '+' ')' ';' '_']
+  | ['&' '*' '|' ':' ',' '=' '(' '+' ')' ';']
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
   | eof
     { Parser.EOF }

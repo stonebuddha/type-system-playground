@@ -8,27 +8,16 @@ let () =
       | _ -> None)
 ;;
 
-type tyexp = Infer.tyexp * bool
+type tyexp = Infer.tyexp
 
 module Env = struct
   type t = tyexp option list String.Map.t
 
   let empty = String.Map.empty
-
-  let add_var_type_bind ?(is_top = false) venv x tye =
-    Map.add_multi venv ~key:x ~data:(Some (tye, is_top))
-  ;;
-
+  let add_var_type_bind venv x tye = Map.add_multi venv ~key:x ~data:(Some tye)
   let find_var_type_bind venv x = List.hd_exn (Map.find_multi venv x)
   let use_var_type_bind venv x = Map.add_multi (Map.remove_multi venv x) ~key:x ~data:None
   let remove_var_type_bind venv x = Map.remove_multi venv x
-
-  let mask_non_top_type_binds venv =
-    Map.map venv ~f:(fun tye_opts ->
-        List.map tye_opts ~f:(function
-            | None -> None
-            | Some (tye, is_top) -> if is_top then Some (tye, is_top) else None))
-  ;;
 
   let meet_var_type_binds venv1 venv2 =
     Map.merge venv1 venv2 ~f:(fun ~key:_ -> function
@@ -42,9 +31,7 @@ module Env = struct
   ;;
 end
 
-let heap_free (tye, is_top) =
-  is_top
-  ||
+let heap_free tye =
   let rec aux = function
     | Infer.Tye_bool -> true
     | Tye_list _ -> false
@@ -75,20 +62,19 @@ let rec g_term_exn env tm =
     let env'1 = g_term_exn env tm1 in
     let env'2 = g_term_exn env'1 tm2 in
     env'2
-  | Tm_iter (tm0, tm1, (x, y, tm2)) ->
+  | Tm_matl (tm0, tm1, (x, y, tm2)) ->
     let env'0 = g_term_exn env tm0 in
     let env'1 = g_term_exn env'0 tm1 in
     (match tm0.term_ty with
     | Infer.Tye_list tye ->
-      let (_ : _) =
+      let env'2 =
         g_term_exn
-          (Env.add_var_type_bind
-             (Env.add_var_type_bind (Env.mask_non_top_type_binds env'1) x tye)
-             y
-             tm1.term_ty)
+          (Env.add_var_type_bind (Env.add_var_type_bind env'0 x tye) y (Tye_list tye))
           tm2
       in
-      env'1
+      Env.meet_var_type_binds
+        env'1
+        (Env.remove_var_type_bind (Env.remove_var_type_bind env'2 y) x)
     | _ -> assert false)
   | Tm_tensor (tm1, tm2) ->
     let env'1 = g_term_exn env tm1 in
@@ -146,26 +132,18 @@ let rec g_term_exn env tm =
     let env'1 = g_term_exn env tm1 in
     let env'2 = g_term_exn (Env.add_var_type_bind env'1 x tm1.term_ty) tm2 in
     Env.remove_var_type_bind env'2 x
+  | Tm_call (_, tm0s) -> List.fold tm0s ~init:env ~f:g_term_exn
 ;;
 
-let g_dec_exn ~verbose env dec =
+let g_dec_exn ~verbose dec =
   match dec.Ast.dec_desc with
-  | Dec_val (x_opt, tm) ->
-    let env', is_top =
-      try g_term_exn (Env.mask_non_top_type_binds env) tm, true with
-      | _ -> g_term_exn env tm, false
-    in
+  | Dec_defn (f, binds, _, ftye, tm) ->
+    let params = List.map binds ~f:fst in
+    let (Infer.Tye_fun (arg_tyes, _)) = ftye in
+    let env = List.fold2_exn params arg_tyes ~init:Env.empty ~f:Env.add_var_type_bind in
+    let (_ : _) = g_term_exn env tm in
     if verbose
-    then
-      Format.printf
-        "val %s: %s@."
-        (Option.value x_opt ~default:"_")
-        (Ast.string_of_ty (Infer.deref_tye tm.term_ty));
-    Option.value_map x_opt ~default:env' ~f:(fun x ->
-        Env.add_var_type_bind ~is_top env' x tm.term_ty)
-  | Dec_decl (x, ty, tye) ->
-    Format.printf "val %s: %s@." x (Ast.string_of_ty ty);
-    Env.add_var_type_bind env x tye
+    then Format.printf "defn %s: %s@." f (Ast.string_of_fun_ty (Infer.deref_fun_tye ftye))
 ;;
 
-let f_dec_exn ~verbose env dec = g_dec_exn ~verbose env dec
+let f_dec_exn ~verbose dec = g_dec_exn ~verbose dec

@@ -21,7 +21,6 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token COLON                        ":"
 %token COMMA                        ","
 %token CONS                         "cons"
-%token DECL                         "decl"
 %token DOTL                         ".l"
 %token DOTR                         ".r"
 %token ELSE                         "else"
@@ -30,11 +29,10 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token FALSE                        "false"
 %token FUN                          "fun"
 %token IF                           "if"
-%token <string> IDENT               "ident" (* just an example *)
+%token <string> LIDENT              "ident" (* just an example *)
 %token IN                           "in"
 %token INL                          "inl"
 %token INR                          "inr"
-%token ITER                         "iter"
 %token LET                          "let"
 %token LIST                         "list"
 %token LPAREN                       "("
@@ -44,13 +42,13 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token PLUS                         "+"
 %token RPAREN                       ")"
 %token SEMICOLON                    ";"
+%token SHOWTYPE                     "#type"
 %token THEN                         "then"
 %token TRUE                         "true"
-%token UNDERSCORE                   "_"
-%token WITH                         "with"
+%token <string> UIDENT              "Ident" (* just an example *)
 
-%start <untyped_dec> dec_exn
-%start <untyped_dec list> file_exn
+%start <cmd> cmd_exn
+%start <cmd list> file_exn
 
 %%
 
@@ -104,25 +102,25 @@ term:
   | mk_term(
       IF term THEN term ELSE term
       { Tm_cond ($2, $4, $6) }
-    | ITER simple_term LPAREN NIL MINUSGREATER term BAR CONS LPAREN IDENT COMMA UNDERSCORE RPAREN WITH IDENT MINUSGREATER term RPAREN
-      { Tm_iter ($2, $6, ($10, $15, $17)) }
+    | CASE simple_term LPAREN NIL MINUSGREATER term BAR CONS LPAREN LIDENT COMMA LIDENT RPAREN MINUSGREATER term RPAREN
+      { Tm_matl ($2, $6, ($10, $12, $15)) }
     | simple_term ASTERISK term
       { Tm_tensor ($1, $3) }
-    | LET IDENT ASTERISK IDENT EQUAL term IN term
+    | LET LIDENT ASTERISK LIDENT EQUAL term IN term
       { Tm_letp ($6, ($2, $4, $8)) }
-    | FUN IDENT MINUSGREATER term
+    | FUN LIDENT MINUSGREATER term
       { Tm_abs ($2, None, $4) }
-    | FUN LPAREN IDENT COLON ty RPAREN MINUSGREATER term
+    | FUN LPAREN LIDENT COLON ty RPAREN MINUSGREATER term
       { Tm_abs ($3, Some $5, $8) }
     | simple_term AMPERSAND term
       { Tm_with ($1, $3) }
-    | LET IDENT EQUAL term IN term
+    | LET LIDENT EQUAL term IN term
       { Tm_let ($4, ($2, $6)) }
     | INL simple_term
       { Tm_inl $2 }
     | INR simple_term
       { Tm_inr $2 }
-    | CASE simple_term LPAREN INL IDENT MINUSGREATER term BAR INR IDENT MINUSGREATER term RPAREN
+    | CASE simple_term LPAREN INL LIDENT MINUSGREATER term BAR INR LIDENT MINUSGREATER term RPAREN
       { Tm_case ($2, ($5, $7), ($10, $12)) }
     )
     { $1 }
@@ -131,7 +129,7 @@ simple_term:
   | LPAREN term RPAREN
     { $2 }
   | mk_term(
-      IDENT
+      LIDENT
       { Tm_var $1 }
     | TRUE
       { Tm_bool true }
@@ -147,26 +145,30 @@ simple_term:
       { Tm_first $1 }
     | simple_term DOTR
       { Tm_second $1 }
+    | UIDENT LPAREN separated_list(COMMA, term) RPAREN
+      { Tm_call ($1, $3) }
     )
     { $1 }
 
-dec_exn:
-  | dec
+dec:
+  | mk_dec(
+      UIDENT LPAREN separated_list(COMMA, pair(LIDENT, option(preceded(COLON, ty)))) RPAREN option(preceded(COLON, ty)) EQUAL term
+      { Dec_defn ($1, $3, $5, (), $7) }
+    )
+    { $1 }
+
+cmd_exn:
+  | cmd
     { $1 }
   | EOF
     { raise End_of_file }
 
-dec:
-  | mk_dec(
-      LET IDENT EQUAL term SEMICOLON
-      { Dec_val (Some $2, $4) }
-    | term SEMICOLON
-      { Dec_val (None, $1) }
-    | DECL IDENT COLON ty SEMICOLON
-      { Dec_decl ($2, $4, ()) }
-    )
-    { $1 }
+cmd:
+  | dec SEMICOLON
+    { Cmd_dec $1 }
+  | SHOWTYPE UIDENT SEMICOLON
+    { Cmd_show_type $2 }
 
 file_exn:
-  | list(dec) EOF
+  | list(cmd) EOF
     { $1 }

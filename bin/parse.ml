@@ -34,10 +34,10 @@ let rec loop lexbuf checkpoint =
    fun terminal ->
     match terminal with
     | T_error -> None
-    | T_WITH -> Some "keyword \"with\""
-    | T_UNDERSCORE -> Some "underscore"
+    | T_UIDENT -> Some "uppercase identifier"
     | T_TRUE -> Some "keyword \"true\""
     | T_THEN -> Some "keyword \"then\""
+    | T_SHOWTYPE -> Some "\"#type\""
     | T_SEMICOLON -> Some "semicolon"
     | T_RPAREN -> Some "right-parenthesis"
     | T_PLUS -> Some "plus symbol"
@@ -46,13 +46,12 @@ let rec loop lexbuf checkpoint =
     | T_MINUSGREATER -> Some "arrow"
     | T_LPAREN -> Some "left-parenthesis"
     | T_LIST -> Some "keyword \"list\""
+    | T_LIDENT -> Some "lowercase identifier"
     | T_LET -> Some "keyword \"let\""
-    | T_ITER -> Some "keyword \"iter\""
     | T_INR -> Some "keyword \"inr\""
     | T_INL -> Some "keyword \"inl\""
     | T_IN -> Some "keyword \"int\""
     | T_IF -> Some "keyword \"if\""
-    | T_IDENT -> Some "identifier"
     | T_FUN -> Some "keyword \"fun\""
     | T_FALSE -> Some "keyword \"false\""
     | T_EQUAL -> Some "equal symbol"
@@ -60,7 +59,6 @@ let rec loop lexbuf checkpoint =
     | T_ELSE -> Some "keyword \"else\""
     | T_DOTR -> Some "\".r\""
     | T_DOTL -> Some "\".l\""
-    | T_DECL -> Some "keyword \"decl\""
     | T_CONS -> Some "keyword \"cons\""
     | T_COMMA -> Some "comma"
     | T_COLON -> Some "colon"
@@ -73,8 +71,14 @@ let rec loop lexbuf checkpoint =
   let string_of_nonterminal : type a. a I.nonterminal -> string option = function
     | N_ty | N_tensor_ty | N_simple_ty | N_additive_ty -> Some "a type"
     | N_term | N_simple_term -> Some "a term"
-    | N_list_dec_ | N_file_exn -> Some "a list of commands"
-    | N_dec_exn | N_dec -> Some "a command"
+    | N_separated_nonempty_list_COMMA_term_
+    | N_loption_separated_nonempty_list_COMMA_term__ -> Some "a list of arguments"
+    | N_separated_nonempty_list_COMMA_pair_LIDENT_option_preceded_COLON_ty____
+    | N_loption_separated_nonempty_list_COMMA_pair_LIDENT_option_preceded_COLON_ty_____ ->
+      Some "a list of parameters"
+    | N_option_preceded_COLON_ty__ -> Some "a parameter"
+    | N_list_cmd_ | N_file_exn -> Some "a list of commands"
+    | N_dec | N_cmd_exn | N_cmd -> Some "a command"
   in
   let string_of_xsymbol (I.X symbol) =
     match symbol with
@@ -142,5 +146,5 @@ let wrap_menhir entry_exn lexbuf =
         raise (Gra_error ("syntax error", loc)))
 ;;
 
-let dec = wrap_menhir Parser.Incremental.dec_exn
+let cmd = wrap_menhir Parser.Incremental.cmd_exn
 let file = wrap_menhir Parser.Incremental.file_exn
