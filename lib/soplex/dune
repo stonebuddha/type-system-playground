@@ -1,0 +1,10 @@
+(library
+ (name soplex)
+ (libraries gmp)
+ (foreign_stubs
+  (language cxx)
+  (names stubs)
+  (flags -std=c++11 -O2 -fvisibility=hidden))
+ (library_flags
+  (:standard -linkall))
+ (c_library_flags -lstdc++ -lsoplex -lgmp -lz))
