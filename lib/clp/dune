@@ -1,0 +1,9 @@
+(library
+ (name clp)
+ (foreign_stubs
+  (language c)
+  (names stubs)
+  (flags -O2))
+ (library_flags
+  (:standard -linkall))
+ (c_library_flags -lClp -lCoinUtils))
