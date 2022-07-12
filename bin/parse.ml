@@ -34,10 +34,14 @@ let rec loop lexbuf checkpoint =
    fun terminal ->
     match terminal with
     | T_error -> None
+    | T_USESOLVER -> Some "\"#use\""
     | T_UIDENT -> Some "uppercase identifier"
     | T_TRUE -> Some "keyword \"true\""
+    | T_TICK -> Some "keyward \"tick\""
     | T_THEN -> Some "keyword \"then\""
+    | T_STATS -> Some "\"#stats\""
     | T_SHOWTYPE -> Some "\"#type\""
+    | T_SETDEGREE -> Some "\"#degree\""
     | T_SEMICOLON -> Some "semicolon"
     | T_RPAREN -> Some "right-parenthesis"
     | T_PLUS -> Some "plus symbol"
@@ -48,11 +52,13 @@ let rec loop lexbuf checkpoint =
     | T_LIST -> Some "keyword \"list\""
     | T_LIDENT -> Some "lowercase identifier"
     | T_LET -> Some "keyword \"let\""
+    | T_INTV -> Some "int literal"
     | T_INR -> Some "keyword \"inr\""
     | T_INL -> Some "keyword \"inl\""
     | T_IN -> Some "keyword \"int\""
     | T_IF -> Some "keyword \"if\""
     | T_FUN -> Some "keyword \"fun\""
+    | T_FLOATV -> Some "float literal"
     | T_FALSE -> Some "keyword \"false\""
     | T_EQUAL -> Some "equal symbol"
     | T_EOF -> Some "EOF"
@@ -66,6 +72,7 @@ let rec loop lexbuf checkpoint =
     | T_BOOL -> Some "keyword \"bool\""
     | T_BAR -> Some "bar symbol"
     | T_ASTERISK -> Some "asterisk"
+    | T_ANALYZE -> Some "\"#analyze\""
     | T_AMPERSAND -> Some "ampersand"
   in
   let string_of_nonterminal : type a. a I.nonterminal -> string option = function
@@ -77,6 +84,9 @@ let rec loop lexbuf checkpoint =
     | N_loption_separated_nonempty_list_COMMA_pair_LIDENT_option_preceded_COLON_ty_____ ->
       Some "a list of parameters"
     | N_option_preceded_COLON_ty__ -> Some "a parameter"
+    | N_nonempty_list_preceded_ASTERISK_simple_term__ -> Some "a tuple"
+    | N_nonempty_list_preceded_ASTERISK_additive_ty__ -> Some "a tensor"
+    | N_nonempty_list_preceded_ASTERISK_LIDENT__ -> Some "a tuple pattern"
     | N_list_cmd_ | N_file_exn -> Some "a list of commands"
     | N_dec | N_cmd_exn | N_cmd -> Some "a command"
   in

@@ -23,7 +23,7 @@ end
 type tyexp =
   | Tye_bool
   | Tye_list of tyexp
-  | Tye_tensor of tyexp * tyexp
+  | Tye_tensor of tyexp list
   | Tye_lolli of tyexp * tyexp
   | Tye_with of tyexp * tyexp
   | Tye_plus of tyexp * tyexp
@@ -45,6 +45,14 @@ module Env = struct
   let find_var_type_bind (_, venv) x = Map.find venv x
 end
 
+module Fundef = struct
+  type t = (fun_tyexp, tyexp) Ast.dec String.Map.t
+
+  let empty = String.Map.empty
+  let add_fun_definition fdef f dec = Map.set fdef ~key:f ~data:dec
+  let find_fun_definition fdef f = Map.find fdef f
+end
+
 let fresh_var () = Tye_var (ref (Tyv_unbound (Type_id.fresh ())))
 
 let rec embed_ty ty =
@@ -52,7 +60,7 @@ let rec embed_ty ty =
   | Ty_const _ -> assert false
   | Ty_bool -> Tye_bool
   | Ty_list ty0 -> Tye_list (embed_ty ty0)
-  | Ty_tensor (ty1, ty2) -> Tye_tensor (embed_ty ty1, embed_ty ty2)
+  | Ty_tensor tys -> Tye_tensor (List.map tys ~f:embed_ty)
   | Ty_lolli (ty1, ty2) -> Tye_lolli (embed_ty ty1, embed_ty ty2)
   | Ty_with (ty1, ty2) -> Tye_with (embed_ty ty1, embed_ty ty2)
   | Ty_plus (ty1, ty2) -> Tye_plus (embed_ty ty1, embed_ty ty2)
@@ -63,7 +71,7 @@ let rec deref_tye tye =
     match tye with
     | Tye_bool -> Ast.Ty_bool
     | Tye_list tye0 -> Ty_list (deref_tye tye0)
-    | Tye_tensor (tye1, tye2) -> Ty_tensor (deref_tye tye1, deref_tye tye2)
+    | Tye_tensor tyes -> Ty_tensor (List.map tyes ~f:deref_tye)
     | Tye_lolli (tye1, tye2) -> Ty_lolli (deref_tye tye1, deref_tye tye2)
     | Tye_with (tye1, tye2) -> Ty_with (deref_tye tye1, deref_tye tye2)
     | Tye_plus (tye1, tye2) -> Ty_plus (deref_tye tye1, deref_tye tye2)
@@ -83,7 +91,7 @@ let rec delink_tye tye =
   match tye with
   | Tye_bool -> Tye_bool
   | Tye_list tye0 -> Tye_list (delink_tye tye0)
-  | Tye_tensor (tye1, tye2) -> Tye_tensor (delink_tye tye1, delink_tye tye2)
+  | Tye_tensor tyes -> Tye_tensor (List.map tyes ~f:delink_tye)
   | Tye_lolli (tye1, tye2) -> Tye_lolli (delink_tye tye1, delink_tye tye2)
   | Tye_with (tye1, tye2) -> Tye_with (delink_tye tye1, delink_tye tye2)
   | Tye_plus (tye1, tye2) -> Tye_plus (delink_tye tye1, delink_tye tye2)
@@ -98,10 +106,9 @@ let delink_fun_tye (Tye_fun (arg_tyes, res_tye)) =
 let rec occur r1 = function
   | Tye_bool -> false
   | Tye_list tye20 -> occur r1 tye20
-  | Tye_tensor (tye21, tye22)
-  | Tye_lolli (tye21, tye22)
-  | Tye_with (tye21, tye22)
-  | Tye_plus (tye21, tye22) -> occur r1 tye21 || occur r1 tye22
+  | Tye_tensor tyes2 -> List.exists tyes2 ~f:(occur r1)
+  | Tye_lolli (tye21, tye22) | Tye_with (tye21, tye22) | Tye_plus (tye21, tye22) ->
+    occur r1 tye21 || occur r1 tye22
   | Tye_var r2 when phys_equal r1 r2 -> true
   | Tye_var { contents = Tyv_link tye20 } -> occur r1 tye20
   | Tye_var { contents = Tyv_unbound _ } -> false
@@ -111,7 +118,10 @@ let rec unify_exn ~loc tye1 tye2 =
   match tye1, tye2 with
   | Tye_bool, Tye_bool -> ()
   | Tye_list tye10, Tye_list tye20 -> unify_exn ~loc tye10 tye20
-  | Tye_tensor (tye11, tye12), Tye_tensor (tye21, tye22)
+  | Tye_tensor tyes1, Tye_tensor tyes2 ->
+    if List.length tyes1 <> List.length tyes2
+    then raise @@ Type_error ("tuple length mismatch", loc)
+    else List.iter2_exn tyes1 tyes2 ~f:(unify_exn ~loc)
   | Tye_lolli (tye11, tye12), Tye_lolli (tye21, tye22)
   | Tye_with (tye11, tye12), Tye_with (tye21, tye22)
   | Tye_plus (tye11, tye12), Tye_plus (tye21, tye22) ->
@@ -164,19 +174,17 @@ let rec g_term_exn env tm =
       in
       unify_exn ~loc:tm2.term_loc tye1 tye2;
       Tm_matl (tm0', tm1', (x, y, tm2')), tye1
-    | Tm_tensor (tm1, tm2) ->
-      let tm1', tye1 = g_term_exn env tm1 in
-      let tm2', tye2 = g_term_exn env tm2 in
-      Tm_tensor (tm1', tm2'), Tye_tensor (tye1, tye2)
-    | Tm_letp (tm0, (x1, x2, tm1)) ->
+    | Tm_tensor tm0s ->
+      let tm'0s, tye0s = List.unzip (List.map tm0s ~f:(g_term_exn env)) in
+      Tm_tensor tm'0s, Tye_tensor tye0s
+    | Tm_letp (tm0, (xs, tm1)) ->
       let tm0', tye0 = g_term_exn env tm0 in
-      let tye1 = fresh_var () in
-      let tye2 = fresh_var () in
-      unify_exn ~loc:tm0.term_loc (Tye_tensor (tye1, tye2)) tye0;
+      let tyes = List.map xs ~f:(fun _ -> fresh_var ()) in
+      unify_exn ~loc:tm0.term_loc (Tye_tensor tyes) tye0;
       let tm1', tye1 =
-        g_term_exn (Env.add_var_type_bind (Env.add_var_type_bind env x1 tye1) x2 tye2) tm1
+        g_term_exn (List.fold2_exn xs tyes ~init:env ~f:Env.add_var_type_bind) tm1
       in
-      Tm_letp (tm0', (x1, x2, tm1')), tye1
+      Tm_letp (tm0', (xs, tm1')), tye1
     | Tm_abs (x, ty_opt, tm0) ->
       let tye_x =
         match ty_opt with
@@ -241,6 +249,15 @@ let rec g_term_exn env tm =
               tm0' :: acc)
         in
         Tm_call (f, List.rev tm'0s_rev), res_tye)
+    | Tm_tick (c, tm0) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      Tm_tick (c, tm0'), tye0
+    | Tm_share (tm0, (x1, x2, tm1)) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tm1', tye1 =
+        g_term_exn (Env.add_var_type_bind (Env.add_var_type_bind env x1 tye0) x2 tye0) tm1
+      in
+      Tm_share (tm0', (x1, x2, tm1')), tye1
   in
   { term_desc = term_desc'; term_ty = tye; term_loc = tm.term_loc }, tye
 ;;

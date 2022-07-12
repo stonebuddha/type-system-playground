@@ -1,14 +1,14 @@
 Append(l1, l2) =
   case l1 (
     nil -> l2
-  | cons(h, t) -> cons(h, Append(t, l2))
+  | cons(h, t) -> tick(1); cons(h, Append(t, l2))
   )
 ;
 
 Snoc(l, b) =
   case l (
-    nil -> cons(b, nil)
-  | cons(h, t) -> cons(h, Snoc(t, b))
+    nil -> tick(1); cons(b, nil)
+  | cons(h, t) -> tick(1); cons(h, Snoc(t, b))
   )
 ;
 
@@ -22,7 +22,7 @@ AppendSlow(l1, l2) =
 RevAux(l, acc) =
   case l (
     nil -> acc
-  | cons(h, t) -> RevAux(t, cons(h, acc))
+  | cons(h, t) -> tick(1); RevAux(t, cons(h, acc))
   )
 ;
 
@@ -30,27 +30,22 @@ Reverse(l) = RevAux(l, nil);
 
 Le(l1, l2) =
   case l1 (
-    nil -> true * nil * l2
+    nil -> true
   | cons(h1, t1) ->
     case l2 (
-      nil -> false * cons(h1, t1) * nil
-    | cons(h2, t2) ->
-      let cmp * tmp = Le(t1, t2) in
-      let t1 * t2 = tmp in
-      cmp * cons(h1, t1) * cons(h2, t2)
+      nil -> false
+    | cons(h2, t2) -> Le(t1, t2)
     )
   )
 ;
 
 Insert(x, l) =
   case l (
-    nil -> cons(x, nil)
+    nil -> tick(1); cons(x, nil)
   | cons(y, t) ->
-    let cmp * tmp = Le(x, y) in
-    let x * y = tmp in
-    if cmp
-    then cons(x, cons(y, t))
-    else cons(y, Insert(x, t))
+    if Le(x, y)
+    then tick(2); cons(x, cons(y, t))
+    else tick(1); cons(y, Insert(x, t))
   )
 ;
 
@@ -66,8 +61,8 @@ AppTail(f, l) =
     nil -> nil
   | cons(h, t) ->
     case t (
-      nil -> cons(f(h), nil)
-    | cons(h', t') -> cons(h, AppTail(f, cons(h', t')))
+      nil -> tick(1); cons(f(h), nil)
+    | cons(h', t') -> tick(2); cons(h, AppTail(f, cons(h', t')))
     )
   )
 ;
@@ -82,7 +77,7 @@ ComposeList(l) =
 Dup2(l: list(bool)) =
   case l (
     nil -> nil
-  | cons(h, t) -> cons(h, cons(h, Dup2(t)))
+  | cons(h, t) -> tick(2); cons(h, cons(h, Dup2(t)))
   )
 ;
 
@@ -98,6 +93,7 @@ Copy2(l: list(bool)) =
     nil -> nil * nil
   | cons(h, t) ->
     let l1 * l2 = Copy2(t) in
+    tick(2);
     cons(h, l1) * cons(h, l2)
   )
 ;
@@ -111,22 +107,411 @@ Copy3(l: list(bool)) =
   case l (
     nil -> nil * nil * nil
   | cons(h, t) ->
-    let l1 * tmp = Copy3(t) in
-    let l2 * l3 = tmp in
+    let l1 * l2 * l3 = Copy3(t) in
+    tick(3);
     cons(h, l1) * cons(h, l2) * cons(h, l3)
   )
 ;
 
 SelfAppend3(l) =
-  let l1 * tmp = Copy3(l) in
-  let l2 * l3 = tmp in
+  let l1 * l2 * l3 = Copy3(l) in
   Append(l1, Append(l2, l3))
 ;
 
 SelfAppend3Slow(l) =
-  let l1 * tmp = Copy3(l) in
-  let l2 * l3 = tmp in
+  let l1 * l2 * l3 = Copy3(l) in
   Append(Append(l1, l2), l3)
 ;
 
 Infinite() = Infinite();
+
+Clone(l: list(bool)) =
+  case l (
+    nil -> nil * nil
+  | cons(h, t) ->
+    tick(-2);
+    let l1 * l2 = Clone(t) in
+    tick(4);
+    cons(h, l1) * cons(h, l2)
+  )
+;
+
+Sec(l: list(bool * bool)) =
+  case l (
+    nil -> nil
+  | cons(h1, t1) ->
+    tick(-3);
+    case t1 (
+      nil -> tick(3); cons(h1, nil)
+    | cons(h2, t2) ->
+      tick(-3);
+      case t2 (
+        nil -> tick(6); cons(h1, cons(h2, nil))
+      | cons(h3, t3) ->
+        tick(-3);
+        tick(6);
+        cons(h1, cons(h2, Sec(t3)))
+      )
+    )
+  )
+;
+
+Tpo(l: list(bool * bool)) =
+  case l (
+    nil -> nil
+  | cons(h1, t1) ->
+    tick(-3);
+    case t1 (
+      nil -> tick(3); cons(h1, nil)
+    | cons(h2, t2) -> tick(6); cons(h1, cons(h2, cons(h1, Tpo(t2))))
+    )
+  )
+;
+
+Tos(l) = Tpo(Sec(l));
+
+TripleFast(l) = Append(l, Append(l, l));
+
+TripleSlow(l) = Append(Append(l, l), l);
+
+DoubleApply1(f, g, l) = f(l * g(l * l));
+
+DoubleApply2(f, g, l) = f(g(l * l) * l);
+
+TripleFastHO(l) =
+  let f = fun p -> let l1 * l2 = p in Append(l1, l2) in
+  DoubleApply1(f, f, l)
+;
+
+TripleFastHO'(l) =
+  let f = fun p -> let l1 * l2 = p in Append(l1, l2) in
+  let g = fun p -> let l1 * l2 = p in Append(l1, l2) in
+  DoubleApply1(f, g, l)
+;
+
+TripleSlowHO(l) =
+  let f = fun p -> let l1 * l2 = p in Append(l1, l2) in
+  DoubleApply2(f, f, l)
+;
+
+TripleSlowHO'(l) =
+  let f = fun p -> let l1 * l2 = p in Append(l1, l2) in
+  let g = fun p -> let l1 * l2 = p in Append(l1, l2) in
+  DoubleApply2(f, g, l)
+;
+
+Zip3(l1, l2, l3) =
+  case l1 (
+    nil -> nil
+  | cons(h1, t1) ->
+    case l2 (
+      nil -> nil
+    | cons(h2, t2) ->
+      case l3 (
+        nil -> nil
+      | cons(h3, t3) ->
+        tick(1);
+        cons(h1 * h2 * h3, Zip3(t1, t2, t3))
+      )
+    )
+  )
+;
+
+Group3(l) =
+  case l (
+    nil -> nil
+  | cons(h1, t1) ->
+    case t1 (
+      nil -> nil
+    | cons(h2, t2) ->
+      case t2 (
+        nil -> nil
+      | cons(h3, t3) ->
+        tick(1);
+        cons(h1 * h2 * h3, Group3(t3))
+      )
+    )
+  )
+;
+
+QueueEmpty() = nil * nil;
+
+QueueEnqueue(x, q) =
+  let inq * outq = q in
+  tick(1);
+  cons(x, inq) * outq
+;
+
+QueueCopyover(q) =
+  let inq * outq = q in
+  case inq (
+    nil -> nil * outq
+  | cons(h, t) ->
+    tick(1);
+    QueueCopyover(t * cons(h, outq))
+  )
+;
+
+QueueDequeue(q) =
+  let inq * outq = q in
+  case outq (
+    nil ->
+    case inq (
+      nil -> (nil * nil) * nil
+    | cons(h, t) ->
+      tick(1);
+      QueueDequeue(QueueCopyover(cons(h, t) * nil))
+    )
+  | cons(h, t) ->
+    tick(1);
+    (inq * t) * cons(h, nil)
+  )
+;
+
+QueueSequence(q, seq) =
+  case seq (
+    nil -> q
+  | cons(req, rest) ->
+    let typ * dat = req in
+    tick(1);
+    if typ
+    then QueueSequence(QueueEnqueue(dat, q), rest)
+    else let q' * res = QueueDequeue(q) in QueueSequence(q', rest)
+  )
+;
+
+QueueSequenceFromEmpty(seq) = QueueSequence(QueueEmpty(), seq);
+
+GoThrough(l) =
+  case l (
+    nil -> nil
+  | cons(h, t) ->
+    tick(1);
+    let t = GoThrough(t) in
+    tick(-1);
+    cons(h, t)
+  )
+;
+
+GoThroughTwice(l) =
+  tick(1);
+  let x = GoThrough(l) in
+  tick(-1);
+  tick(1);
+  let y = GoThrough(l) in
+  tick(-1);
+  false
+;
+
+Choc(wallet) =
+  case wallet (
+    nil -> false
+  | cons(h, t) ->
+    tick(2);
+    Choc(t)
+  )
+;
+
+Caramel(wallet) =
+  case wallet (
+    nil -> false
+  | cons(h, t) ->
+    tick(5);
+    let res = Caramel(t) in
+    tick(-2);
+    res
+  )
+;
+
+BadBuy(wallet) =
+  let c = Choc(wallet) in
+  Caramel(wallet)
+;
+
+BuyCandy(wallet) =
+  let c = Caramel(wallet) in
+  Choc(wallet)
+;
+
+BadBuy2(wallet) =
+  let alice = wallet in
+  let bob = wallet in
+  let c = Choc(bob) in
+  Caramel(alice)
+;
+
+BuyCandy2(wallet) =
+  let alice = wallet in
+  let bob = wallet in
+  let c = Caramel(alice) in
+  Choc(bob)
+;
+
+Ampersand() =
+  let a = (tick(1); true) & (tick(1); true) in
+  let b = a.l in
+  let c = a.r in
+  let d = a.r in
+  let e = a.l in
+  a
+;
+
+ProduceConsume() =
+  let a = (tick(1); false) & (tick(-1); true) in
+  let b = a.r in
+  let c = a.r in
+  let d = a.l in
+  let e = a.r in
+  let f = a.l in
+  let g = a.l in
+  a
+;
+
+Attach(x, l) =
+  case l (
+    nil -> nil
+  | cons(y, t) -> tick(1); cons(x * y, Attach(x, t))
+  )
+;
+
+AppendPairs(l1, l2) =
+  case l1 (
+    nil -> l2
+  | cons(h, t) -> tick(1); cons(h, AppendPairs(t, l2))
+  )
+;
+
+Pairs(l) =
+  case l (
+    nil -> nil
+  | cons(x, t) -> tick(1); AppendPairs(Attach(x, t), Pairs(t))
+  )
+;
+
+AttachPairs(x, l) =
+  case l (
+    nil -> nil
+  | cons(y, t) -> tick(1); cons(x * y, AttachPairs(x, t))
+  )
+;
+
+AppendTriples(l1, l2) =
+  case l1 (
+    nil -> l2
+  | cons(h, t) -> tick(1); cons(h, AppendTriples(t, l2))
+  )
+;
+
+Triples(l) =
+  case l (
+    nil -> nil
+  | cons(x, t) -> tick(1); AppendTriples(AttachPairs(x, Pairs(t)), Triples(t))
+  )
+;
+
+LeBool(a, b) = if a then if b then true else false else true;
+
+Split(p, l) =
+  case l (
+    nil -> nil * nil
+  | cons(h, t) ->
+    tick(1);
+    let ls * rs = Split(p, t) in
+    if LeBool(h, p)
+    then cons(h, ls) * rs
+    else ls * cons(h, rs)
+  )
+;
+
+QuickSort(l) =
+  case l (
+    nil -> nil
+  | cons(h, t) ->
+    tick(1);
+    let ls * rs = Split(h, t) in
+    Append(QuickSort(ls), cons(h, QuickSort(rs)))
+  )
+;
+
+QuickSortAux(l, acc) =
+  case l (
+    nil -> acc
+  | cons(x, xs) ->
+    tick(1);
+    let ls * rs = Split(x, xs) in
+    let acc' = cons(x, QuickSortAux(rs, acc)) in
+    QuickSortAux(ls, acc')
+  )
+;
+
+QuickSortTail(l) = QuickSortAux(l, nil);
+
+SplitHO(p, l) =
+  case l (
+    nil -> nil * nil
+  | cons(h, t) ->
+    tick(1);
+    let ls * rs = SplitHO(p, t) in
+    if p(h)
+    then cons(h, ls) * rs
+    else ls * cons(h, rs)
+  )
+;
+
+QuickSortHO(le, l) =
+  case l (
+    nil -> nil
+  | cons(h, t) ->
+    tick(1);
+    let ls * rs = SplitHO(fun x -> le(x * h), t) in
+    Append(QuickSortHO(le, ls), cons(h, QuickSortHO(le, rs)))
+  )
+;
+
+QuickSortBools(l) = QuickSortHO(fun p -> let x * y = p in LeBool(x, y), l);
+
+Msplit(l) =
+  case l (
+    nil -> nil * nil
+  | cons(x1, xs) ->
+    tick(1);
+    case xs (
+      nil -> cons(x1, nil) * nil
+    | cons(x2, xs') ->
+      tick(1);
+      let l1 * l2 = Msplit(xs') in
+      cons(x1, l1) * cons(x2, l2)
+    )
+  )
+;
+
+Merge(l1, l2) =
+  case l1 (
+    nil -> l2
+  | cons(x, xs) ->
+    tick(1);
+    case l2 (
+      nil -> cons(x, xs)
+    | cons(y, ys) ->
+      tick(1);
+      if LeBool(x, y)
+      then cons(x, Merge(xs, cons(y, ys)))
+      else cons(y, Merge(cons(x, xs), ys))
+    )
+  )
+;
+
+MergeSort(l) =
+  case l (
+    nil -> nil
+  | cons(x1, xs) ->
+    tick(1);
+    case xs (
+      nil -> l
+    | cons(x2, xs') ->
+      tick(1);
+      let l1 * l2 = Msplit(l) in
+      Merge(MergeSort(l1), MergeSort(l2))
+    )
+  )
+;

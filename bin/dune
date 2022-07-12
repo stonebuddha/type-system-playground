@@ -1,6 +1,6 @@
 (executable
  (name main)
- (libraries repl menhirLib)
+ (libraries repl soplex clp menhirLib)
  (preprocess
   (pps ppx_jane)))
 

@@ -5,6 +5,7 @@ let symbol_table =
   Hashtbl.of_alist_exn
     (module String)
     [ "&", Parser.AMPERSAND
+    ; "#analyze", Parser.ANALYZE
     ; "*", Parser.ASTERISK
     ; "|", Parser.BAR
     ; "bool", Parser.BOOL
@@ -31,9 +32,13 @@ let symbol_table =
     ; "+", Parser.PLUS
     ; ")", Parser.RPAREN
     ; ";", Parser.SEMICOLON
+    ; "#degree", Parser.SETDEGREE
     ; "#type", Parser.SHOWTYPE
+    ; "#stats", Parser.STATS
     ; "then", Parser.THEN
+    ; "tick", Parser.TICK
     ; "true", Parser.TRUE
+    ; "#use", Parser.USESOLVER
     ]
 ;;
 
@@ -69,11 +74,18 @@ let digit = ['0'-'9']
 let lower = ['a'-'z']
 let upper = ['A'-'Z']
 
+let int_literal = '-'? digit+
+let float_literal = '-'? digit+ '.' digit+ (['E' 'e'] '-'? digit+)?
+
 rule token_exn = parse
   | newline
     { update_loc lexbuf None 1 false 0; token_exn lexbuf }
   | blank+
     { token_exn lexbuf }
+  | int_literal as lit
+    { Parser.INTV (Int.of_string lit) }
+  | float_literal as lit
+    { Parser.FLOATV (Float.of_string lit) }
   | lower (lower | upper | digit | '_' | '\'')* as name
     { match Hashtbl.find symbol_table name with
       | Some kwd ->
@@ -82,7 +94,7 @@ rule token_exn = parse
           Parser.LIDENT name }
   | upper (lower | upper | digit | '_' | '\'')* as name
     { Parser.UIDENT name }
-  | ".l" | ".r" | "->" | "-o" | "#type"
+  | "#analyze" | ".l" | ".r" | "->" | "-o" | "#degree" | "#type" | "#stats" | "#use"
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
   | ['&' '*' '|' ':' ',' '=' '(' '+' ')' ';']
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }

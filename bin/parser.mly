@@ -14,6 +14,7 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %}
 
 %token AMPERSAND                    "&"
+%token ANALYZE                      "#analyze"
 %token ASTERISK                     "*"
 %token BAR                          "|"
 %token BOOL                         "bool"
@@ -27,8 +28,10 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token EOF                          ""
 %token EQUAL                        "="
 %token FALSE                        "false"
+%token <float> FLOATV               "12.34" (* just an example *)
 %token FUN                          "fun"
 %token IF                           "if"
+%token <int> INTV                   "42" (* just an example *)
 %token <string> LIDENT              "ident" (* just an example *)
 %token IN                           "in"
 %token INL                          "inl"
@@ -42,10 +45,14 @@ let mk_dec ~loc dec_desc = { dec_desc; dec_loc = make_loc loc }
 %token PLUS                         "+"
 %token RPAREN                       ")"
 %token SEMICOLON                    ";"
+%token SETDEGREE                    "#degree"
 %token SHOWTYPE                     "#type"
+%token STATS                        "#stats"
 %token THEN                         "then"
+%token TICK                         "tick"
 %token TRUE                         "true"
 %token <string> UIDENT              "Ident" (* just an example *)
+%token USESOLVER                    "#use"
 
 %start <cmd> cmd_exn
 %start <cmd list> file_exn
@@ -69,8 +76,8 @@ tensor_ty:
   | additive_ty
     { $1 }
   | mk_ty(
-      additive_ty ASTERISK tensor_ty
-      { Ty_tensor ($1, $3) }
+      additive_ty nonempty_list(preceded(ASTERISK, additive_ty))
+      { Ty_tensor ($1 :: $2) }
     )
     { $1 }
 
@@ -104,10 +111,10 @@ term:
       { Tm_cond ($2, $4, $6) }
     | CASE simple_term LPAREN NIL MINUSGREATER term BAR CONS LPAREN LIDENT COMMA LIDENT RPAREN MINUSGREATER term RPAREN
       { Tm_matl ($2, $6, ($10, $12, $15)) }
-    | simple_term ASTERISK term
-      { Tm_tensor ($1, $3) }
-    | LET LIDENT ASTERISK LIDENT EQUAL term IN term
-      { Tm_letp ($6, ($2, $4, $8)) }
+    | simple_term nonempty_list(preceded(ASTERISK, simple_term))
+      { Tm_tensor ($1 :: $2) }
+    | LET LIDENT nonempty_list(preceded(ASTERISK, LIDENT)) EQUAL term IN term
+      { Tm_letp ($5, ($2 :: $3, $7)) }
     | FUN LIDENT MINUSGREATER term
       { Tm_abs ($2, None, $4) }
     | FUN LPAREN LIDENT COLON ty RPAREN MINUSGREATER term
@@ -122,6 +129,10 @@ term:
       { Tm_inr $2 }
     | CASE simple_term LPAREN INL LIDENT MINUSGREATER term BAR INR LIDENT MINUSGREATER term RPAREN
       { Tm_case ($2, ($5, $7), ($10, $12)) }
+    | TICK LPAREN FLOATV RPAREN SEMICOLON term
+      { Tm_tick ($3, $6) }
+    | TICK LPAREN INTV RPAREN SEMICOLON term
+      { Tm_tick (Float.of_int $3, $6) }
     )
     { $1 }
 
@@ -168,6 +179,16 @@ cmd:
     { Cmd_dec $1 }
   | SHOWTYPE UIDENT SEMICOLON
     { Cmd_show_type $2 }
+  | USESOLVER LIDENT SEMICOLON
+    { Cmd_use_solver $2 }
+  | ANALYZE UIDENT SEMICOLON
+    { Cmd_analyze $2 }
+  | SETDEGREE INTV SEMICOLON
+    { Cmd_set_degree $2 }
+  | STATS TRUE SEMICOLON
+    { Cmd_print_stats true }
+  | STATS FALSE SEMICOLON
+    { Cmd_print_stats false }
 
 file_exn:
   | list(cmd) EOF
