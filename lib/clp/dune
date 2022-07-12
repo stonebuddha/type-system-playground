@@ -1,5 +1,6 @@
 (library
  (name clp)
+ (libraries gmp)
  (foreign_stubs
   (language c)
   (names stubs)

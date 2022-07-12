@@ -1,8 +1,27 @@
 module F = struct
+  type t = float
+
   let zero = 0.
+  let one = 1.
+  let minus_one = -1.
   let infinity = Float.infinity
   let neg_infinity = Float.neg_infinity
+  let abs = Float.abs
+  let ( ~- ) = Float.neg
   let ( + ) = Float.add
+  let ( - ) = Float.sub
+  let ( * ) = Float.mul
+  let ( / ) = Float.div
+  let ( >= ) a b = Float.compare a b >= 0
+  let ( < ) a b = Float.compare a b < 0
+  let ( > ) a b = Float.compare a b > 0
+  let ( <= ) a b = Float.compare a b <= 0
+  let is_zero f = abs f < 1e-6
+  let of_int = Float.of_int
+  let of_float f = f
+  let of_mpq = Mpqf.to_float
+  let pp fmt f = Format.fprintf fmt "%g" f
+  let string_of_t f = if is_zero f then "0" else Format.sprintf "%g" f
 end
 
 type lp_manager =
@@ -84,11 +103,11 @@ let add_lprow man ?(k = F.zero) pairs o =
   man.row_cnt <- man.row_cnt + 1
 ;;
 
-let new_lpvar man =
+let new_lpvar ?(lower = F.neg_infinity) ?(upper = F.infinity) man =
   let column =
     { Stubs.column_obj = F.zero
-    ; column_lower = F.neg_infinity
-    ; column_upper = F.infinity
+    ; column_lower = lower
+    ; column_upper = upper
     ; column_elements = [||]
     }
   in
@@ -102,6 +121,7 @@ let new_lpvar man =
 
 let update_objective_coefficients man pairs =
   flush_rows man;
+  flush_columns man;
   let obj = Stubs.objective_coefficients man.ins in
   List.iter (fun (idx, coef) -> obj.(idx) <- coef) (reduce_coefs pairs);
   Stubs.change_objective_coefficients man.ins obj
@@ -111,6 +131,7 @@ let set_log_level man l = man.log_level <- l
 
 let initial_solve man dir =
   flush_rows man;
+  flush_columns man;
   (match dir with
   | `Maximize -> Stubs.set_direction man.ins Maximize
   | `Minimize -> Stubs.set_direction man.ins Minimize);
@@ -120,6 +141,7 @@ let initial_solve man dir =
 
 let solve_primal man dir =
   flush_rows man;
+  flush_columns man;
   (match dir with
   | `Maximize -> Stubs.set_direction man.ins Maximize
   | `Minimize -> Stubs.set_direction man.ins Minimize);

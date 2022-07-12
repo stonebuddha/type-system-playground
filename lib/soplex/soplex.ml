@@ -1,8 +1,27 @@
 module F = struct
+  type t = Mpqf.t
+
   let zero = Mpqf.of_int 0
+  let one = Mpqf.of_int 1
+  let minus_one = Mpqf.of_int (-1)
   let infinity = Mpqf.of_float 1e100
   let neg_infinity = Mpqf.of_float (-1e100)
+  let abs = Mpqf.abs
+  let ( ~- ) = Mpqf.neg
   let ( + ) = Mpqf.add
+  let ( - ) = Mpqf.sub
+  let ( * ) = Mpqf.mul
+  let ( / ) = Mpqf.div
+  let ( >= ) a b = Mpqf.cmp a b >= 0
+  let ( < ) a b = Mpqf.cmp a b < 0
+  let ( > ) a b = Mpqf.cmp a b > 0
+  let ( <= ) a b = Mpqf.cmp a b <= 0
+  let is_zero f = Mpqf.cmp f zero = 0
+  let of_int = Mpqf.of_int
+  let of_float = Mpqf.of_float
+  let of_mpq f = f
+  let pp = Mpqf.print
+  let string_of_t = Mpqf.to_string
 end
 
 type lp_manager =
@@ -84,11 +103,11 @@ let add_lprow man ?(k = F.zero) pairs o =
   man.row_cnt <- man.row_cnt + 1
 ;;
 
-let new_lpvar man =
+let new_lpvar ?(lower = F.neg_infinity) ?(upper = F.infinity) man =
   let column =
     { Stubs.column_obj = F.zero
-    ; column_lower = F.neg_infinity
-    ; column_upper = F.infinity
+    ; column_lower = lower
+    ; column_upper = upper
     ; column_elements = [||]
     }
   in
@@ -102,6 +121,7 @@ let new_lpvar man =
 
 let update_objective_coefficients man pairs =
   flush_rows man;
+  flush_columns man;
   let obj = Stubs.objective_coefficients man.ins in
   List.iter (fun (idx, coef) -> obj.(idx) <- coef) (reduce_coefs pairs);
   Stubs.change_objective_coefficients man.ins obj
@@ -109,8 +129,9 @@ let update_objective_coefficients man pairs =
 
 let set_log_level man l = man.log_level <- l
 
-let solve_primal man dir =
+let initial_solve man dir =
   flush_rows man;
+  flush_columns man;
   (match dir with
   | `Maximize -> Stubs.set_direction man.ins Maximize
   | `Minimize -> Stubs.set_direction man.ins Minimize);
@@ -118,6 +139,7 @@ let solve_primal man dir =
   Stubs.solve man.ins
 ;;
 
+let solve_primal = initial_solve
 let primal_objective_value man = Stubs.objective_value man.ins
 
 let primal_column_solution man =
