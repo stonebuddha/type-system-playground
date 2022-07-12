@@ -21,9 +21,12 @@ module Type_id = struct
 end
 
 type tyexp =
-  | Tye_const of string
-  | Tye_app of tyexp * tyexp list
-  | Tye_arrow of tyexp * tyexp
+  | Tye_bool
+  | Tye_list of tyexp
+  | Tye_tensor of tyexp * tyexp
+  | Tye_lolli of tyexp * tyexp
+  | Tye_with of tyexp * tyexp
+  | Tye_plus of tyexp * tyexp
   | Tye_var of tyvar ref
 
 and tyvar =
@@ -31,44 +34,60 @@ and tyvar =
   | Tyv_unbound of Type_id.t
 
 module Env = struct
-  type t = String.Set.t * tyexp String.Map.t
+  type t = tyexp String.Map.t
 
-  let empty = String.Set.empty, String.Map.empty
-  let add_type_const (tenv, venv) name = Set.add tenv name, venv
-  let mem_type_const (tenv, _) name = Set.mem tenv name
-  let add_var_type_bind (tenv, venv) x tye = tenv, Map.set venv ~key:x ~data:tye
-  let find_var_type_bind (_, venv) x = Map.find venv x
+  let empty = String.Map.empty
+  let add_var_type_bind venv x tye = Map.set venv ~key:x ~data:tye
+  let find_var_type_bind venv x = Map.find venv x
 end
 
 let fresh_var () = Tye_var (ref (Tyv_unbound (Type_id.fresh ())))
 
-let rec embed_ty_exn env ty =
+let rec embed_ty ty =
   match ty.Ast.ty_desc with
-  | Ty_const name ->
-    if Env.mem_type_const env name
-    then Tye_const name
-    else raise @@ Type_error ("type constant " ^ name ^ " not found", ty.ty_loc)
-  | Ty_app (ty1, ty2s) ->
-    Tye_app (embed_ty_exn env ty1, List.map ty2s ~f:(embed_ty_exn env))
-  | Ty_arrow (ty1, ty2) -> Tye_arrow (embed_ty_exn env ty1, embed_ty_exn env ty2)
+  | Ty_const _ -> assert false
+  | Ty_bool -> Tye_bool
+  | Ty_list ty0 -> Tye_list (embed_ty ty0)
+  | Ty_tensor (ty1, ty2) -> Tye_tensor (embed_ty ty1, embed_ty ty2)
+  | Ty_lolli (ty1, ty2) -> Tye_lolli (embed_ty ty1, embed_ty ty2)
+  | Ty_with (ty1, ty2) -> Tye_with (embed_ty ty1, embed_ty ty2)
+  | Ty_plus (ty1, ty2) -> Tye_plus (embed_ty ty1, embed_ty ty2)
 ;;
 
 let rec deref_tye tye =
   let ty_desc =
     match tye with
-    | Tye_const name -> Ast.Ty_const name
-    | Tye_app (tye1, tye2s) -> Ty_app (deref_tye tye1, List.map tye2s ~f:deref_tye)
-    | Tye_arrow (tye1, tye2) -> Ty_arrow (deref_tye tye1, deref_tye tye2)
+    | Tye_bool -> Ast.Ty_bool
+    | Tye_list tye0 -> Ty_list (deref_tye tye0)
+    | Tye_tensor (tye1, tye2) -> Ty_tensor (deref_tye tye1, deref_tye tye2)
+    | Tye_lolli (tye1, tye2) -> Ty_lolli (deref_tye tye1, deref_tye tye2)
+    | Tye_with (tye1, tye2) -> Ty_with (deref_tye tye1, deref_tye tye2)
+    | Tye_plus (tye1, tye2) -> Ty_plus (deref_tye tye1, deref_tye tye2)
     | Tye_var { contents = Tyv_link tye0 } -> (deref_tye tye0).ty_desc
     | Tye_var { contents = Tyv_unbound id } -> Ty_const ("_weak" ^ Int.to_string id)
   in
   { ty_desc; ty_loc = Location.none }
 ;;
 
+let rec delink_tye tye =
+  match tye with
+  | Tye_bool -> Tye_bool
+  | Tye_list tye0 -> Tye_list (delink_tye tye0)
+  | Tye_tensor (tye1, tye2) -> Tye_tensor (delink_tye tye1, delink_tye tye2)
+  | Tye_lolli (tye1, tye2) -> Tye_lolli (delink_tye tye1, delink_tye tye2)
+  | Tye_with (tye1, tye2) -> Tye_with (delink_tye tye1, delink_tye tye2)
+  | Tye_plus (tye1, tye2) -> Tye_plus (delink_tye tye1, delink_tye tye2)
+  | Tye_var { contents = Tyv_link tye0 } -> delink_tye tye0
+  | Tye_var ({ contents = Tyv_unbound _ } as r) -> Tye_var r
+;;
+
 let rec occur r1 = function
-  | Tye_const _ -> false
-  | Tye_app (tye21, tye22s) -> occur r1 tye21 || List.exists tye22s ~f:(occur r1)
-  | Tye_arrow (tye21, tye22) -> occur r1 tye21 || occur r1 tye22
+  | Tye_bool -> false
+  | Tye_list tye20 -> occur r1 tye20
+  | Tye_tensor (tye21, tye22)
+  | Tye_lolli (tye21, tye22)
+  | Tye_with (tye21, tye22)
+  | Tye_plus (tye21, tye22) -> occur r1 tye21 || occur r1 tye22
   | Tye_var r2 when phys_equal r1 r2 -> true
   | Tye_var { contents = Tyv_link tye20 } -> occur r1 tye20
   | Tye_var { contents = Tyv_unbound _ } -> false
@@ -76,12 +95,12 @@ let rec occur r1 = function
 
 let rec unify_exn ~loc tye1 tye2 =
   match tye1, tye2 with
-  | Tye_const name1, Tye_const name2 when String.(name1 = name2) -> ()
-  | Tye_app (tye11, tye12s), Tye_app (tye21, tye22s)
-    when List.length tye12s = List.length tye22s ->
-    unify_exn ~loc tye11 tye21;
-    List.iter2_exn tye12s tye22s ~f:(unify_exn ~loc)
-  | Tye_arrow (tye11, tye12), Tye_arrow (tye21, tye22) ->
+  | Tye_bool, Tye_bool -> ()
+  | Tye_list tye10, Tye_list tye20 -> unify_exn ~loc tye10 tye20
+  | Tye_tensor (tye11, tye12), Tye_tensor (tye21, tye22)
+  | Tye_lolli (tye11, tye12), Tye_lolli (tye21, tye22)
+  | Tye_with (tye11, tye12), Tye_with (tye21, tye22)
+  | Tye_plus (tye11, tye12), Tye_plus (tye21, tye22) ->
     unify_exn ~loc tye11 tye21;
     unify_exn ~loc tye12 tye22
   | Tye_var r1, Tye_var r2 when phys_equal r1 r2 -> ()
@@ -103,16 +122,92 @@ let rec g_term_exn env tm =
       (match Env.find_var_type_bind env x with
       | Some tye -> Ast.Tm_var x, tye
       | None -> raise @@ Type_error ("variable " ^ x ^ " not found", tm.term_loc))
-    | Tm_abs (x, tm0) ->
-      let tye_x = fresh_var () in
+    | Tm_bool b -> Tm_bool b, Tye_bool
+    | Tm_cond (tm0, tm1, tm2) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      unify_exn ~loc:tm0.term_loc Tye_bool tye0;
+      let tm1', tye1 = g_term_exn env tm1 in
+      let tm2', tye2 = g_term_exn env tm2 in
+      unify_exn ~loc:tm2.term_loc tye1 tye2;
+      Tm_cond (tm0', tm1', tm2'), tye1
+    | Tm_nil ->
+      let tye0 = fresh_var () in
+      Tm_nil, Tye_list tye0
+    | Tm_cons (tm1, tm2) ->
+      let tm1', tye1 = g_term_exn env tm1 in
+      let tm2', tye2 = g_term_exn env tm2 in
+      unify_exn ~loc:tm2.term_loc (Tye_list tye1) tye2;
+      Tm_cons (tm1', tm2'), Tye_list tye1
+    | Tm_iter (tm0, tm1, (x, y, tm2)) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_list tye) tye0;
+      let tm1', tye1 = g_term_exn env tm1 in
+      let tm2', tye2 =
+        g_term_exn (Env.add_var_type_bind (Env.add_var_type_bind env x tye) y tye1) tm2
+      in
+      unify_exn ~loc:tm2.term_loc tye1 tye2;
+      Tm_iter (tm0', tm1', (x, y, tm2')), tye1
+    | Tm_tensor (tm1, tm2) ->
+      let tm1', tye1 = g_term_exn env tm1 in
+      let tm2', tye2 = g_term_exn env tm2 in
+      Tm_tensor (tm1', tm2'), Tye_tensor (tye1, tye2)
+    | Tm_letp (tm0, (x1, x2, tm1)) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye1 = fresh_var () in
+      let tye2 = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_tensor (tye1, tye2)) tye0;
+      let tm1', tye1 =
+        g_term_exn (Env.add_var_type_bind (Env.add_var_type_bind env x1 tye1) x2 tye2) tm1
+      in
+      Tm_letp (tm0', (x1, x2, tm1')), tye1
+    | Tm_abs (x, ty_opt, tm0) ->
+      let tye_x =
+        match ty_opt with
+        | None -> fresh_var ()
+        | Some ty -> embed_ty ty
+      in
       let tm0', tye0 = g_term_exn (Env.add_var_type_bind env x tye_x) tm0 in
-      Tm_abs (x, tm0'), Tye_arrow (tye_x, tye0)
+      Tm_abs (x, ty_opt, tm0'), Tye_lolli (tye_x, tye0)
     | Tm_app (tm1, tm2) ->
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 = g_term_exn env tm2 in
       let tye_res = fresh_var () in
-      unify_exn ~loc:tm1.term_loc (Tye_arrow (tye2, tye_res)) tye1;
+      unify_exn ~loc:tm1.term_loc (Tye_lolli (tye2, tye_res)) tye1;
       Tm_app (tm1', tm2'), tye_res
+    | Tm_with (tm1, tm2) ->
+      let tm1', tye1 = g_term_exn env tm1 in
+      let tm2', tye2 = g_term_exn env tm2 in
+      Tm_with (tm1', tm2'), Tye_with (tye1, tye2)
+    | Tm_first tm0 ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye1 = fresh_var () in
+      let tye2 = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_with (tye1, tye2)) tye0;
+      Tm_first tm0', tye1
+    | Tm_second tm0 ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye1 = fresh_var () in
+      let tye2 = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_with (tye1, tye2)) tye0;
+      Tm_second tm0', tye2
+    | Tm_inl tm0 ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye_other = fresh_var () in
+      Tm_inl tm0', Tye_plus (tye0, tye_other)
+    | Tm_inr tm0 ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tye_other = fresh_var () in
+      Tm_inr tm0', Tye_plus (tye_other, tye0)
+    | Tm_case (tm0, (x1, tm1), (x2, tm2)) ->
+      let tm0', tye0 = g_term_exn env tm0 in
+      let tyel = fresh_var () in
+      let tyer = fresh_var () in
+      unify_exn ~loc:tm0.term_loc (Tye_plus (tyel, tyer)) tye0;
+      let tm1', tye1 = g_term_exn (Env.add_var_type_bind env x1 tyel) tm1 in
+      let tm2', tye2 = g_term_exn (Env.add_var_type_bind env x2 tyer) tm2 in
+      unify_exn ~loc:tm2.term_loc tye1 tye2;
+      Tm_case (tm0', (x1, tm1'), (x2, tm2')), tye1
     | Tm_let (tm1, (x, tm2)) ->
       let tm1', tye1 = g_term_exn env tm1 in
       let tm2', tye2 = g_term_exn (Env.add_var_type_bind env x tye1) tm2 in
@@ -121,29 +216,19 @@ let rec g_term_exn env tm =
   { term_desc = term_desc'; term_ty = tye; term_loc = tm.term_loc }, tye
 ;;
 
-let g_dec_exn ~verbose env dec =
+let g_dec_exn env dec =
   let dec_desc', env' =
     match dec.Ast.dec_desc with
     | Dec_val (x_opt, tm) ->
       let tm', tye = g_term_exn env tm in
-      if verbose
-      then
-        Format.printf
-          "val %s: %s@."
-          (Option.value x_opt ~default:"_")
-          (Ast.string_of_ty (deref_tye tye));
-      ( Ast.Dec_val (x_opt, Ast.map_ty_term ~f:deref_tye tm')
+      ( Ast.Dec_val (x_opt, Ast.map_ty_term ~f:delink_tye tm')
       , Option.value_map x_opt ~default:env ~f:(fun x -> Env.add_var_type_bind env x tye)
       )
-    | Dec_type name ->
-      if verbose then Format.printf "type %s is registered@." name;
-      Dec_type name, Env.add_type_const env name
-    | Dec_decl (x, ty) ->
-      let tye = embed_ty_exn env ty in
-      if verbose then Format.printf "val %s: %s@." x (Ast.string_of_ty ty);
-      Dec_decl (x, ty), Env.add_var_type_bind env x tye
+    | Dec_decl (x, ty, _) ->
+      let tye = embed_ty ty in
+      Dec_decl (x, ty, tye), Env.add_var_type_bind env x tye
   in
   { Ast.dec_desc = dec_desc'; dec_loc = dec.dec_loc }, env'
 ;;
 
-let f_dec_exn ~verbose env dec = g_dec_exn ~verbose env dec
+let f_dec_exn env dec = g_dec_exn env dec

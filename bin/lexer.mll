@@ -4,18 +4,39 @@ open Core
 let symbol_table =
   Hashtbl.of_alist_exn
     (module String)
-    [ ":", Parser.COLON
+    [ "&", Parser.AMPERSAND
+    ; "*", Parser.ASTERISK
+    ; "|", Parser.BAR
+    ; "bool", Parser.BOOL
+    ; "case", Parser.CASE
+    ; ":", Parser.COLON
     ; ",", Parser.COMMA
+    ; "cons", Parser.CONS
     ; "decl", Parser.DECL
+    ; ".l", Parser.DOTL
+    ; ".r", Parser.DOTR
+    ; "else", Parser.ELSE
     ; "=", Parser.EQUAL
+    ; "false", Parser.FALSE
     ; "fun", Parser.FUN
+    ; "if", Parser.IF
     ; "in", Parser.IN
+    ; "inl", Parser.INL
+    ; "inr", Parser.INR
+    ; "iter", Parser.ITER
     ; "let", Parser.LET
+    ; "list", Parser.LIST
     ; "(", Parser.LPAREN
     ; "->", Parser.MINUSGREATER
+    ; "-o", Parser.MINUSO
+    ; "nil", Parser.NIL
+    ; "+", Parser.PLUS
     ; ")", Parser.RPAREN
     ; ";", Parser.SEMICOLON
-    ; "type", Parser.TYPE
+    ; "then", Parser.THEN
+    ; "true", Parser.TRUE
+    ; "_", Parser.UNDERSCORE
+    ; "with", Parser.WITH
     ]
 ;;
 
@@ -62,9 +83,9 @@ rule token_exn = parse
           kwd
       | None ->
           Parser.IDENT name }
-  | "->"
+  | ".l" | ".r" | "->" | "-o"
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
-  | [':' ',' '=' '(' ')' ';']
+  | ['&' '*' '|' ':' ',' '=' '(' '+' ')' ';' '_']
     { Hashtbl.find_exn symbol_table (Lexing.lexeme lexbuf) }
   | eof
     { Parser.EOF }
