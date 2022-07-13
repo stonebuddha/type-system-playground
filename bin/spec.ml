@@ -1,7 +1,7 @@
 open Core
 
 module Lang = struct
-  let name = "aara-base"
+  let name = "linear-aara-remainder"
 
   type command = Ast.cmd
   type environment = Infer.Env.t * Infer.Fundef.t
@@ -18,7 +18,7 @@ module Lang = struct
         match cmd with
         | Ast.Cmd_dec dec ->
           let dec', infer_env' = Infer.f_dec_exn infer_env dec in
-          let normalized_dec = Normalize.f_dec ~elim_reuse:true dec' in
+          let normalized_dec = Normalize.f_dec ~elim_reuse:false dec' in
           let fdef' =
             match normalized_dec.dec_desc with
             | Dec_defn (f, _, _, _, _) ->
