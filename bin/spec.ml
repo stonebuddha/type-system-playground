@@ -1,7 +1,7 @@
 open Core
 
 module Lang = struct
-  let name = "aara-base"
+  let name = "linear-aara-vanilla"
 
   type command = Ast.cmd
   type environment = Infer.Env.t * Infer.Fundef.t
