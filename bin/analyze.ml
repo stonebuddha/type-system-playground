@@ -64,13 +64,13 @@ module Make (B : Potential.BACKEND) = struct
     | _ -> assert false
   ;;
 
-  let find_var_or_embed env x ~ty =
+  let find_var_or_embed env x ~ty ~degree =
     match Env.find_var_type_bind env x with
     | Some tye -> tye
-    | None -> embed_ty ty
+    | None -> embed_ty ~degree ty
   ;;
 
-  let rec g_term fdef ctx call_stack =
+  let rec g_term ~degree ~cost_free fdef ctx call_stack =
     let rec aux ((post_tye, post_pot) as post_rtye) tm =
       match tm.Ast.term_desc with
       | Tm_var x -> Env.add_var_type_bind Env.empty x post_tye, post_pot
@@ -86,12 +86,12 @@ module Make (B : Potential.BACKEND) = struct
         let x1 = get_var tm1 in
         let x2 = get_var tm2 in
         (match post_tye with
-        | Tye_list ((tye0, pot0) as rtye0) ->
+        | Tye_list (qs, tye0) ->
           ( Env.add_var_type_bind
               (Env.add_var_type_bind Env.empty x1 tye0)
               x2
-              (Tye_list rtye0)
-          , add_annot post_pot pot0 )
+              (Tye_list (shift_annots qs, tye0))
+          , add_annot post_pot (List.hd_exn qs) )
         | _ -> assert false)
       | Tm_matl (tm0, tm1, (x, y, tm2)) ->
         let x0 = get_var tm0 in
@@ -99,19 +99,20 @@ module Make (B : Potential.BACKEND) = struct
         let env2, pre_pot2 = aux (post_tye, weaken_annot post_pot) tm2 in
         (match tm0.term_ty with
         | Infer.Tye_list ty00 ->
-          let tye_x = find_var_or_embed env2 x ~ty:ty00 in
-          let tye_y = find_var_or_embed env2 y ~ty:(Tye_list ty00) in
+          let tye_x = find_var_or_embed env2 x ~ty:ty00 ~degree in
+          let tye_y = find_var_or_embed env2 y ~ty:(Tye_list ty00) ~degree in
           (match tye_y with
-          | Tye_list (tye_y0, pot_y0) ->
+          | Tye_list (qs_y0, tye_y0) ->
             assert_eq_tye tye_x tye_y0;
-            let pot_x = weaken_annot pot_y0 in
+            let qs = new_nonneg_annots ~degree in
+            assert_ge_annots (shift_annots qs) qs_y0;
             ( Env.add_var_type_bind
                 (Env.join
                    env1
                    (Env.remove_var_type_bind (Env.remove_var_type_bind env2 x) y))
                 x0
-                (Tye_list (tye_x, pot_x))
-            , max_annot pre_pot1 (sub_annot pre_pot2 pot_x) )
+                (Tye_list (qs, tye_x))
+            , max_annot pre_pot1 (sub_annot pre_pot2 (List.hd_exn qs)) )
           | _ -> assert false)
         | _ -> assert false)
       | Tm_tensor tm0s ->
@@ -126,7 +127,8 @@ module Make (B : Potential.BACKEND) = struct
         (match tm0.term_ty with
         | Infer.Tye_tensor ty00s ->
           let tye00s =
-            List.map2_exn xs ty00s ~f:(fun x ty00 -> find_var_or_embed env1 x ~ty:ty00)
+            List.map2_exn xs ty00s ~f:(fun x ty00 ->
+                find_var_or_embed env1 x ~ty:ty00 ~degree)
           in
           ( Env.add_var_type_bind
               (List.fold xs ~init:env1 ~f:Env.remove_var_type_bind)
@@ -139,7 +141,7 @@ module Make (B : Potential.BACKEND) = struct
         | Infer.Tye_lolli (ty1, _), Tye_lolli (Tye_fun (rtye1, (tye2, pot2))) ->
           let borrowed_pot = new_nonneg_annot () in
           let env0, pre_pot0 = aux (tye2, add_annot pot2 borrowed_pot) tm0 in
-          let tye_x = find_var_or_embed env0 x ~ty:ty1 in
+          let tye_x = find_var_or_embed env0 x ~ty:ty1 ~degree in
           assert_eq_rtye rtye1 (tye_x, sub_annot pre_pot0 borrowed_pot);
           let env0_del_x = Env.remove_var_type_bind env0 x in
           Env.assert_potential_free env0_del_x;
@@ -148,7 +150,7 @@ module Make (B : Potential.BACKEND) = struct
       | Tm_app (tm1, tm2) ->
         let x1 = get_var tm1 in
         let x2 = get_var tm2 in
-        let arg_tye = embed_ty tm2.term_ty in
+        let arg_tye = embed_ty ~degree tm2.term_ty in
         let arg_pot = new_nonneg_annot () in
         let frame = new_nonneg_annot () in
         ( Env.add_var_type_bind
@@ -188,7 +190,7 @@ module Make (B : Potential.BACKEND) = struct
                  ( Tye_fun ((Tye_tensor [], arg_pot), (post_tye, sub_annot post_pot frame))
                  , Tye_fun
                      ( (Tye_tensor [], new_nonneg_annot ())
-                     , (embed_ty ty02, new_nonneg_annot ()) ) ))
+                     , (embed_ty ~degree ty02, new_nonneg_annot ()) ) ))
           , add_annot arg_pot frame )
         | _ -> assert false)
       | Tm_second tm0 ->
@@ -203,7 +205,7 @@ module Make (B : Potential.BACKEND) = struct
               (Tye_with
                  ( Tye_fun
                      ( (Tye_tensor [], new_nonneg_annot ())
-                     , (embed_ty ty01, new_nonneg_annot ()) )
+                     , (embed_ty ~degree ty01, new_nonneg_annot ()) )
                  , Tye_fun ((Tye_tensor [], arg_pot), (post_tye, sub_annot post_pot frame))
                  ))
           , add_annot arg_pot frame )
@@ -226,8 +228,8 @@ module Make (B : Potential.BACKEND) = struct
         let env2, pre_pot2 = aux (post_tye, weaken_annot post_pot) tm2 in
         (match tm0.term_ty with
         | Tye_plus (ty01, ty02) ->
-          let tye1 = find_var_or_embed env1 x1 ~ty:ty01 in
-          let tye2 = find_var_or_embed env2 x2 ~ty:ty02 in
+          let tye1 = find_var_or_embed env1 x1 ~ty:ty01 ~degree in
+          let tye2 = find_var_or_embed env2 x2 ~ty:ty02 ~degree in
           let pot1 = new_nonneg_annot () in
           let pot2 = new_nonneg_annot () in
           ( Env.add_var_type_bind
@@ -240,31 +242,75 @@ module Make (B : Potential.BACKEND) = struct
         | _ -> assert false)
       | Tm_let (tm1, (x, tm2)) ->
         let env2, pre_pot2 = aux post_rtye tm2 in
-        let tye_x = find_var_or_embed env2 x ~ty:tm1.term_ty in
+        let tye_x = find_var_or_embed env2 x ~ty:tm1.term_ty ~degree in
         let env1, pre_pot1 = aux (tye_x, pre_pot2) tm1 in
         Env.add env1 (Env.remove_var_type_bind env2 x), pre_pot1
       | Tm_call (f, tm0s) ->
         let x0s = List.map tm0s ~f:get_var in
         let fname = Ast.Call_site.fname_of_t f in
         let dec = Option.value_exn (Infer.Fundef.find_fun_definition fdef fname) in
-        let call_stack' = Ast.Call_stack.extend f call_stack in
-        let frame = new_nonneg_annot () in
-        let arg_tye, arg_pot =
-          g_dec fdef ctx call_stack' dec (post_tye, sub_annot post_pot frame)
+        let call_stack' =
+          (if cost_free then Ast.Call_stack.extend_k ~k:0 else Ast.Call_stack.extend)
+            f
+            call_stack
         in
-        (match arg_tye with
-        | Tye_tensor arg_tye0s ->
-          ( List.fold2_exn x0s arg_tye0s ~init:Env.empty ~f:Env.add_var_type_bind
-          , add_annot arg_pot frame )
-        | _ -> assert false)
+        if cost_free || degree = 1
+        then (
+          let frame = new_nonneg_annot () in
+          let arg_tye, arg_pot =
+            g_dec
+              ~degree
+              ~cost_free
+              fdef
+              ctx
+              call_stack'
+              dec
+              (post_tye, sub_annot post_pot frame)
+          in
+          match arg_tye with
+          | Tye_tensor arg_tye0s ->
+            ( List.fold2_exn x0s arg_tye0s ~init:Env.empty ~f:Env.add_var_type_bind
+            , add_annot arg_pot frame )
+          | _ -> assert false)
+        else (
+          let non_cf_post_tye, cf_post_tye = split_tye_cf post_tye in
+          let non_cf_post_pot, cf_post_pot = split_annot post_pot in
+          let non_cf_arg_tye, non_cf_arg_pot =
+            g_dec
+              ~degree
+              ~cost_free
+              fdef
+              ctx
+              call_stack'
+              dec
+              (non_cf_post_tye, non_cf_post_pot)
+          in
+          let cf_arg_tye, cf_arg_pot =
+            g_dec
+              ~degree:(degree - 1)
+              ~cost_free:true
+              fdef
+              (Hashtbl.create (module Ast.Call_stack))
+              (Ast.Call_stack.empty ~fname)
+              dec
+              (cf_post_tye, cf_post_pot)
+          in
+          match add_tye_cf non_cf_arg_tye cf_arg_tye with
+          | Tye_tensor arg_tye0s ->
+            ( List.fold2_exn x0s arg_tye0s ~init:Env.empty ~f:Env.add_var_type_bind
+            , add_annot non_cf_arg_pot cf_arg_pot )
+          | _ -> assert false)
       | Tm_tick (c, tm0) ->
-        let env0, pre_pot0 = aux post_rtye tm0 in
-        env0, add_annot_scalar pre_pot0 (F.of_float c)
+        if cost_free
+        then aux post_rtye tm0
+        else (
+          let env0, pre_pot0 = aux post_rtye tm0 in
+          env0, add_annot_scalar pre_pot0 (F.of_float c))
       | Tm_share (tm0, (x1, x2, tm1)) ->
         let x0 = get_var tm0 in
         let env1, pre_pot1 = aux post_rtye tm1 in
-        let tye1 = find_var_or_embed env1 x1 ~ty:tm0.term_ty in
-        let tye2 = find_var_or_embed env1 x2 ~ty:tm0.term_ty in
+        let tye1 = find_var_or_embed env1 x1 ~ty:tm0.term_ty ~degree in
+        let tye2 = find_var_or_embed env1 x2 ~ty:tm0.term_ty ~degree in
         ( Env.add_var_type_bind
             (Env.remove_var_type_bind (Env.remove_var_type_bind env1 x1) x2)
             x0
@@ -273,7 +319,7 @@ module Make (B : Potential.BACKEND) = struct
     in
     aux
 
-  and g_dec fdef ctx call_stack dec res_rtye =
+  and g_dec ~degree ~cost_free fdef ctx call_stack dec res_rtye =
     match Hashtbl.find ctx call_stack with
     | Some (mk_arg_rtye, rec_res_rtye) ->
       assert_eq_rtye rec_res_rtye res_rtye;
@@ -288,16 +334,16 @@ module Make (B : Potential.BACKEND) = struct
           | Some arg_rtye -> arg_rtye
           | None ->
             let arg_rtye =
-              Tye_tensor (List.map arg_tys ~f:embed_ty), new_nonneg_annot ()
+              Tye_tensor (List.map arg_tys ~f:(embed_ty ~degree)), new_nonneg_annot ()
             in
             rec_arg_rtye := Some arg_rtye;
             arg_rtye
         in
         Hashtbl.add_exn ctx ~key:call_stack ~data:(mk_arg_rtye, res_rtye);
-        let env, pre_pot = g_term fdef ctx call_stack res_rtye tm in
+        let env, pre_pot = g_term ~degree ~cost_free fdef ctx call_stack res_rtye tm in
         let tye0s =
           List.map2_exn binds arg_tys ~f:(fun (x, _) arg_ty ->
-              find_var_or_embed env x ~ty:arg_ty)
+              find_var_or_embed env x ~ty:arg_ty ~degree)
         in
         let tye = Tye_tensor tye0s in
         (match !rec_arg_rtye with
@@ -307,7 +353,7 @@ module Make (B : Potential.BACKEND) = struct
   ;;
 end
 
-let f_dec (solver : (module Potential.BACKEND)) ~verbose ~degree:_ ~print_stats fdef dec =
+let f_dec (solver : (module Potential.BACKEND)) ~verbose ~degree ~print_stats fdef dec =
   let module B = (val solver : Potential.BACKEND) in
   let module M = Make (B) in
   let open M in
@@ -316,9 +362,11 @@ let f_dec (solver : (module Potential.BACKEND)) ~verbose ~degree:_ ~print_stats 
     if verbose
     then Format.printf "defn %s: %s@." f (Ast.string_of_fun_ty (Infer.deref_fun_tye fty));
     let (Infer.Tye_fun (_, res_ty)) = fty in
-    let res_rtye = embed_ty res_ty, new_nonneg_annot () in
+    let res_rtye = embed_ty ~degree res_ty, new_nonneg_annot () in
     let arg_rtye =
       g_dec
+        ~degree
+        ~cost_free:false
         fdef
         (Hashtbl.create (module Ast.Call_stack))
         (Ast.Call_stack.empty ~fname:f)
