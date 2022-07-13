@@ -4,10 +4,38 @@ module Make (B : Potential.BACKEND) = struct
   module P = Potential.Make (B)
   include P
 
+  let new_nonneg_annots ~degree = List.init degree ~f:(fun _ -> new_nonneg_annot ())
+  let zero_annots ~degree = List.init degree ~f:(fun _ -> zero_annot)
+  let assert_eq_annots = List.iter2_exn ~f:assert_eq_annot
+
+  let assert_eq_annots_scalar lpvars k =
+    List.iter lpvars ~f:(fun lpvar -> assert_eq_annot_scalar lpvar k)
+  ;;
+
+  let assert_ge_annots = List.iter2_exn ~f:assert_ge_annot
+  let add_annots = List.map2_exn ~f:add_annot
+  let min_annots = List.map2_exn ~f:min_annot
+  let max_annots = List.map2_exn ~f:max_annot
+  let split_annots lpvars = List.unzip (List.map lpvars ~f:split_annot)
+
+  let add_annots_unequal_lengths lpvars1 lpvars2 =
+    let lpvars1 = Array.of_list lpvars1 in
+    let lpvars2 = Array.of_list lpvars2 in
+    let n1, n2 = Array.length lpvars1, Array.length lpvars2 in
+    List.init (max n1 n2) ~f:(fun i ->
+        if i < n1 && i < n2
+        then add_annot lpvars1.(i) lpvars2.(i)
+        else if i < n1
+        then lpvars1.(i)
+        else lpvars2.(i))
+  ;;
+
+  let shift_annots lpvars = add_annots_unequal_lengths lpvars (List.tl_exn lpvars)
+
   type 'annot pure_tyexp =
     | Tye_const of string
     | Tye_bool
-    | Tye_list of 'annot rich_tyexp
+    | Tye_list of 'annot list * 'annot pure_tyexp
     | Tye_tensor of 'annot pure_tyexp list
     | Tye_lolli of 'annot fun_tyexp
     | Tye_with of 'annot fun_tyexp * 'annot fun_tyexp
@@ -51,7 +79,16 @@ module Make (B : Potential.BACKEND) = struct
     and aux_simple = function
       | Tye_const name -> name
       | Tye_bool -> "bool"
-      | Tye_list rtye0 -> "list(" ^ string_of_rtye ~f `Ty rtye0 ^ ")"
+      | Tye_list (qs, tye0) ->
+        "list("
+        ^ aux tye0
+        ^ ", "
+        ^ "["
+        ^ String.concat
+            ~sep:", "
+            (List.map ~f:(fun q -> Option.value (f q) ~default:"0") qs)
+        ^ "]"
+        ^ ")"
       | tye -> "(" ^ aux tye ^ ")"
     in
     match l with
@@ -87,7 +124,7 @@ module Make (B : Potential.BACKEND) = struct
   let rec map_annot_tye ~f = function
     | Tye_const name -> Tye_const name
     | Tye_bool -> Tye_bool
-    | Tye_list rtye0 -> Tye_list (map_annot_rtye ~f rtye0)
+    | Tye_list (qs, tye0) -> Tye_list (List.map ~f qs, map_annot_tye ~f tye0)
     | Tye_tensor tye0s -> Tye_tensor (List.map tye0s ~f:(map_annot_tye ~f))
     | Tye_lolli ftye0 -> Tye_lolli (map_annot_ftye ~f ftye0)
     | Tye_with (ftye1, ftye2) ->
@@ -106,7 +143,16 @@ module Make (B : Potential.BACKEND) = struct
   let rec get_coefs_tye ~is_negative l = function
     | Tye_const _ -> [], []
     | Tye_bool -> [], []
-    | Tye_list rtye0 -> get_coefs_rtye ~is_negative F.(l * of_int 10) rtye0
+    | Tye_list (qs, tye0) ->
+      let coefs0, inv_coefs0 = get_coefs_tye ~is_negative F.(l * of_int 10) tye0 in
+      ( snd
+          (List.fold
+             qs
+             ~init:(F.(l * of_int 10), [])
+             ~f:(fun (l, acc) q ->
+               F.(l * of_int 10), (q, if is_negative then l else F.(-l)) :: acc))
+        @ coefs0
+      , inv_coefs0 )
     | Tye_tensor tye0s ->
       let coefs0s, inv_coefs0s =
         List.unzip (List.map tye0s ~f:(get_coefs_tye ~is_negative l))
@@ -141,11 +187,11 @@ module Make (B : Potential.BACKEND) = struct
     [ neg_coefs; pos_coefs ]
   ;;
 
-  let embed_ty =
+  let embed_ty ~degree =
     let rec aux ty =
       match ty with
       | Infer.Tye_bool -> Tye_bool
-      | Tye_list ty0 -> Tye_list (aux ty0, new_nonneg_annot ())
+      | Tye_list ty0 -> Tye_list (new_nonneg_annots ~degree, aux ty0)
       | Tye_tensor ty0s -> Tye_tensor (List.map ty0s ~f:aux)
       | Tye_lolli (ty1, ty2) -> Tye_lolli (Tye_fun (ty1, ty2))
       | Tye_with (ty1, ty2) ->
@@ -158,18 +204,25 @@ module Make (B : Potential.BACKEND) = struct
     aux
   ;;
 
-  let zero_embed_ty =
+  let zero_embed_ty ~is_concrete ~degree =
     let rec aux ty =
       match ty with
       | Infer.Tye_bool -> Tye_bool
-      | Tye_list ty0 -> Tye_list (aux ty0, zero_annot)
+      | Tye_list ty0 -> Tye_list (zero_annots ~degree, aux ty0)
       | Tye_tensor ty0s -> Tye_tensor (List.map ty0s ~f:aux)
       | Tye_lolli (ty1, ty2) ->
-        Tye_lolli (Tye_fun_concrete ((aux ty1, zero_annot), (aux ty2, zero_annot)))
+        Tye_lolli
+          (if is_concrete
+          then Tye_fun_concrete ((aux ty1, zero_annot), (aux ty2, zero_annot))
+          else Tye_fun (ty1, ty2))
       | Tye_with (ty1, ty2) ->
         Tye_with
-          ( Tye_fun_concrete ((Tye_tensor [], zero_annot), (aux ty1, zero_annot))
-          , Tye_fun_concrete ((Tye_tensor [], zero_annot), (aux ty2, zero_annot)) )
+          ( (if is_concrete
+            then Tye_fun_concrete ((Tye_tensor [], zero_annot), (aux ty1, zero_annot))
+            else Tye_fun (Tye_tensor [], ty1))
+          , if is_concrete
+            then Tye_fun_concrete ((Tye_tensor [], zero_annot), (aux ty2, zero_annot))
+            else Tye_fun (Tye_tensor [], ty2) )
       | Tye_plus (ty1, ty2) -> Tye_plus ((aux ty1, zero_annot), (aux ty2, zero_annot))
       | Tye_var { contents = Tyv_link ty0 } -> aux ty0
       | Tye_var { contents = Tyv_unbound id } -> Tye_const ("_weak" ^ Int.to_string id)
@@ -182,7 +235,9 @@ module Make (B : Potential.BACKEND) = struct
       match tye1, tye2 with
       | Tye_const name1, Tye_const name2 when String.(name1 = name2) -> ()
       | Tye_bool, Tye_bool -> ()
-      | Tye_list rtye10, Tye_list rtye20 -> assert_eq_rtye rtye10 rtye20
+      | Tye_list (qs1, tye10), Tye_list (qs2, tye20) ->
+        assert_eq_annots qs1 qs2;
+        aux tye10 tye20
       | Tye_tensor tye10s, Tye_tensor tye20s -> List.iter2_exn tye10s tye20s ~f:aux
       | Tye_lolli ftye1, Tye_lolli ftye2 -> assert_eq_ftye ftye1 ftye2
       | Tye_with (ftye11, ftye12), Tye_with (ftye21, ftye22) ->
@@ -213,7 +268,9 @@ module Make (B : Potential.BACKEND) = struct
       match tye with
       | Tye_const _ -> ()
       | Tye_bool -> ()
-      | Tye_list rtye0 -> assert_potential_free_rtye rtye0
+      | Tye_list (qs, tye0) ->
+        assert_eq_annots_scalar qs F.zero;
+        aux tye0
       | Tye_tensor tye0s -> List.iter tye0s ~f:aux
       | Tye_lolli _ -> ()
       | Tye_with _ -> ()
@@ -233,7 +290,8 @@ module Make (B : Potential.BACKEND) = struct
       match tye1, tye2 with
       | Tye_const name1, Tye_const name2 when String.(name1 = name2) -> Tye_const name1
       | Tye_bool, Tye_bool -> Tye_bool
-      | Tye_list rtye10, Tye_list rtye20 -> Tye_list (add_rtye rtye10 rtye20)
+      | Tye_list (qs1, tye10), Tye_list (qs2, tye20) ->
+        Tye_list (add_annots qs1 qs2, aux tye10 tye20)
       | Tye_tensor tye10s, Tye_tensor tye20s ->
         Tye_tensor (List.map2_exn tye10s tye20s ~f:aux)
       | Tye_lolli ftye1, Tye_lolli ftye2 ->
@@ -256,7 +314,8 @@ module Make (B : Potential.BACKEND) = struct
       match tye1, tye2 with
       | Tye_const name1, Tye_const name2 when String.(name1 = name2) -> Tye_const name1
       | Tye_bool, Tye_bool -> Tye_bool
-      | Tye_list rtye10, Tye_list rtye20 -> Tye_list (min_rtye rtye10 rtye20)
+      | Tye_list (qs1, tye10), Tye_list (qs2, tye20) ->
+        Tye_list (min_annots qs1 qs2, aux tye10 tye20)
       | Tye_tensor tye10s, Tye_tensor tye20s ->
         Tye_tensor (List.map2_exn tye10s tye20s ~f:aux)
       | Tye_lolli ftye1, Tye_lolli ftye2 -> Tye_lolli (min_ftye ftye1 ftye2)
@@ -282,7 +341,8 @@ module Make (B : Potential.BACKEND) = struct
       match tye1, tye2 with
       | Tye_const name1, Tye_const name2 when String.(name1 = name2) -> Tye_const name1
       | Tye_bool, Tye_bool -> Tye_bool
-      | Tye_list rtye10, Tye_list rtye20 -> Tye_list (max_rtye rtye10 rtye20)
+      | Tye_list (qs1, tye10), Tye_list (qs2, tye20) ->
+        Tye_list (max_annots qs1 qs2, aux tye10 tye20)
       | Tye_tensor tye10s, Tye_tensor tye20s ->
         Tye_tensor (List.map2_exn tye10s tye20s ~f:aux)
       | Tye_lolli ftye1, Tye_lolli ftye2 -> Tye_lolli (max_ftye ftye1 ftye2)
@@ -301,6 +361,70 @@ module Make (B : Potential.BACKEND) = struct
     | Tye_fun _, Tye_fun _ -> ftye1
     | Tye_fun_concrete (arg_rtye1, res_rtye1), Tye_fun_concrete (arg_rtye2, res_rtye2) ->
       Tye_fun_concrete (min_rtye arg_rtye1 arg_rtye2, max_rtye res_rtye1 res_rtye2)
+    | _ -> assert false
+  ;;
+
+  let rec add_tye_cf =
+    let rec aux tye1 tye2 =
+      match tye1, tye2 with
+      | Tye_const name1, Tye_const name2 when String.(name1 = name2) -> Tye_const name1
+      | Tye_bool, Tye_bool -> Tye_bool
+      | Tye_list (qs1, tye10), Tye_list (qs2, tye20) ->
+        Tye_list (add_annots_unequal_lengths qs1 qs2, aux tye10 tye20)
+      | Tye_tensor tye10s, Tye_tensor tye20s ->
+        Tye_tensor (List.map2_exn tye10s tye20s ~f:aux)
+      | Tye_lolli ftye1, Tye_lolli ftye2 -> Tye_lolli (add_ftye_cf ftye1 ftye2)
+      | Tye_with (ftye11, ftye12), Tye_with (ftye21, ftye22) ->
+        Tye_with (add_ftye_cf ftye11 ftye21, add_ftye_cf ftye12 ftye22)
+      | Tye_plus (rtye11, rtye12), Tye_plus (rtye21, rtye22) ->
+        Tye_plus (add_rtye_cf rtye11 rtye21, add_rtye_cf rtye12 rtye22)
+      | _ -> assert false
+    in
+    aux
+
+  and add_rtye_cf (tye1, pot1) (tye2, pot2) = add_tye_cf tye1 tye2, add_annot pot1 pot2
+
+  and add_ftye_cf ftye1 ftye2 =
+    match ftye1, ftye2 with
+    | Tye_fun _, Tye_fun _ -> ftye1
+    | _ -> assert false
+  ;;
+
+  let rec split_tye_cf =
+    let rec aux tye =
+      match tye with
+      | Tye_const name -> Tye_const name, Tye_const name
+      | Tye_bool -> Tye_bool, Tye_bool
+      | Tye_list (qs, tye0) ->
+        let qs1, qs2 = split_annots qs in
+        assert_eq_annot_scalar (List.last_exn qs2) F.zero;
+        let tye10, tye20 = aux tye0 in
+        Tye_list (qs1, tye10), Tye_list (List.drop_last_exn qs2, tye20)
+      | Tye_tensor tye0s ->
+        let tye10s, tye20s = List.unzip (List.map tye0s ~f:aux) in
+        Tye_tensor tye10s, Tye_tensor tye20s
+      | Tye_lolli ftye0 ->
+        let ftye10, ftye20 = split_ftye_cf ftye0 in
+        Tye_lolli ftye10, Tye_lolli ftye20
+      | Tye_with (ftye1, ftye2) ->
+        let ftye11, ftye21 = split_ftye_cf ftye1 in
+        let ftye12, ftye22 = split_ftye_cf ftye2 in
+        Tye_with (ftye11, ftye12), Tye_with (ftye21, ftye22)
+      | Tye_plus (rtye1, rtye2) ->
+        let rtye11, rtye21 = split_rtye_cf rtye1 in
+        let rtye12, rtye22 = split_rtye_cf rtye2 in
+        Tye_plus (rtye11, rtye12), Tye_plus (rtye21, rtye22)
+    in
+    aux
+
+  and split_rtye_cf (tye, pot) =
+    let tye1, tye2 = split_tye_cf tye in
+    let pot1, pot2 = split_annot pot in
+    (tye1, pot1), (tye2, pot2)
+
+  and split_ftye_cf ftye =
+    match ftye with
+    | Tye_fun _ -> ftye, ftye
     | _ -> assert false
   ;;
 end
