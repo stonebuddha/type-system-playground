@@ -1,7 +1,7 @@
 open Core
 
 module Lang = struct
-  let name = "aara-base"
+  let name = "multivariate-aara-vanilla"
 
   type command = Ast.cmd
   type environment = Infer.Env.t * Infer.Fundef.t
@@ -10,7 +10,7 @@ module Lang = struct
   let parse_file = Parse.file
   let create_environment () = Infer.Env.empty, Infer.Fundef.empty
   let lp_backend = ref (module Soplex : Potential.BACKEND)
-  let analysis_degree = ref 1
+  let analysis_degree = ref 2
   let print_stats = ref false
 
   let execute cmd ~from:(infer_env, fdef) ~verbose =
