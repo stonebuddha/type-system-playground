@@ -37,7 +37,7 @@ module Make (L : LANG) = struct
   ;;
 
   let parse_file filename =
-    match Sys.file_exists filename with
+    match Sys_unix.file_exists filename with
     | `No | `Unknown -> Error (Invalid_option (filename ^ " does not exist"))
     | `Yes ->
       In_channel.with_file filename ~f:(fun inchan ->
@@ -105,7 +105,7 @@ module Make (L : LANG) = struct
     Location.input_name := "//toplevel//";
     Location.input_lexbuf := Some lexbuf;
     Location.input_phrase_buffer := Some phrase_buffer;
-    Sys.catch_break true;
+    Sys_unix.catch_break true;
     let rec loop env =
       let env' =
         try
@@ -118,7 +118,7 @@ module Make (L : LANG) = struct
              L.execute cmd ~from:env ~verbose:true)
         with
         | End_of_file -> exit 0
-        | Sys.Break ->
+        | Sys_unix.Break ->
           Format.eprintf "Interrupted.@.";
           env
         | exn ->
@@ -136,7 +136,7 @@ module Make (L : LANG) = struct
       Command.Param.(
         map
           (both
-             (anon (sequence ("filename" %: Filename.arg_type)))
+             (anon (sequence ("filename" %: Filename_unix.arg_type)))
              (flag "-no-wrapper" no_arg ~doc:" run without a command-line wrapper"))
           ~f:(fun (filenames, no_wrapper) () ->
             if not no_wrapper
@@ -149,7 +149,7 @@ module Make (L : LANG) = struct
               argv.(0) <- "rlwrap";
               try
                 ignore
-                  (Unix.exec ~prog:"rlwrap" ~argv:(Array.to_list argv) () : never_returns)
+                  (Core_unix.exec ~prog:"rlwrap" ~argv:(Array.to_list argv) () : never_returns)
               with
               | _ -> ());
             let env =
@@ -166,7 +166,7 @@ module Make (L : LANG) = struct
 
   let main () =
     Misc.Color.setup None;
-    Command.run driver
+    Command_unix.run driver
   ;;
 
   let produce_prelude_environment () =
